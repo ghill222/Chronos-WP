@@ -2,7 +2,7 @@
   "name": "Chronos-WP V4",
   "short_name": "Chronos V4",
   "description": "Vibrational Weather Sports Prediction Engine",
-  "start_url": "./chronos_wp_v4_FINAL_allFixes.html",
+  "start_url": "./app.html",
   "display": "standalone",
   "background_color": "#0f1419",
   "theme_color": "#0f1419",
