@@ -8424,15 +8424,28 @@ function _showBracketTable() {
         function switchToAccuracy() {
             // Scroll to top when switching tabs
             window.scrollTo({ top: 0, behavior: 'instant' });
-            
+            // Set currentSport so auto-refresh doesn't overwrite accuracy content
+            currentSport = 'accuracy';
+            if (typeof cbbActiveView !== 'undefined') cbbActiveView = 'games';
+            // Hide CBB sub-nav if visible
+            const sn = document.getElementById('cbb-sub-nav');
+            if (sn) sn.style.display = 'none';
             // Update active tab
             document.querySelectorAll('.sport-tab').forEach(tab => {
                 tab.classList.remove('active');
             });
             document.querySelector('[data-sport="accuracy"]').classList.add('active');
-            
-            // Render accuracy dashboard
-            renderAccuracyDashboard();
+            // Show loading state immediately so mobile doesn't look frozen
+            document.getElementById('content').innerHTML =
+                '<div style="color:#8b92a7;padding:60px;text-align:center;font-size:14px;">⏳ Loading accuracy dashboard...</div>';
+            // Slight delay so the loading state renders before the heavy dashboard build
+            setTimeout(function() {
+                try { renderAccuracyDashboard(); }
+                catch(e) {
+                    document.getElementById('content').innerHTML =
+                        '<div style="color:#f59e0b;padding:40px;text-align:center;"><div style="font-size:24px;margin-bottom:12px;">⚠️</div><div style="font-size:14px;font-weight:700;">Error loading Accuracy tab</div><div style="font-size:11px;color:#4a5568;margin-top:8px;">' + e.message + '</div></div>';
+                }
+            }, 50);
         }
         
         // ============================================
@@ -10952,6 +10965,183 @@ function _showBracketTable() {
                 html = '<div style="color: #8b92a7; padding: 40px; text-align: center;">No pregame games found for today. Check back later!</div>';
             }
             
+            // ── MARCH MADNESS CBB SECTION ──────────────────────────────────────────────
+            // Fetch today's CBB games (March Madness), run VW scoring, build MM-specific parlays
+            let mmHtml = '';
+            try {
+                const mmPicks = []; // ML picks
+                const mmOUPicks = []; // O/U picks
+                const mmATSPicks = []; // ATS picks
+                const today = new Date();
+                const mmDateStr = today.getFullYear() + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
+                const mmResp = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates=' + mmDateStr + '&groups=50');
+                const mmData = mmResp.ok ? await mmResp.json() : { events: [] };
+                const mmEvents = (mmData.events || []).filter(ev => {
+                    const comp = (ev.competitions||[])[0];
+                    return comp && comp.status && comp.status.type && comp.status.type.state === 'pre';
+                });
+
+                for (const ev of mmEvents) {
+                    const comp = ev.competitions[0];
+                    const homeC = comp.competitors.find(t => t.homeAway === 'home');
+                    const awayC = comp.competitors.find(t => t.homeAway === 'away');
+                    if (!homeC || !awayC) continue;
+                    const homeTeam = homeC.team.displayName;
+                    const awayTeam = awayC.team.displayName;
+                    const homeSeed = homeC.curatedRank && homeC.curatedRank.current ? homeC.curatedRank.current : (homeC.records ? '' : '');
+                    const awaySeed = awayC.curatedRank && awayC.curatedRank.current ? awayC.curatedRank.current : '';
+                    const gameTime = new Date(comp.date);
+
+                    // VW scoring
+                    const mmVW    = calculateAllCalendarsVW(gameTime);
+                    const homeTS  = scoreTeamVW(homeTeam, mmVW);
+                    const awayTS  = scoreTeamVW(awayTeam, mmVW);
+                    const winner  = homeTS.total >= awayTS.total ? homeTeam : awayTeam;
+                    const loser   = winner === homeTeam ? awayTeam : homeTeam;
+                    const wTS     = winner === homeTeam ? homeTS : awayTS;
+                    const lTS     = winner === homeTeam ? awayTS : homeTS;
+                    const margin  = Math.abs(homeTS.total - awayTS.total);
+                    const wSeed   = winner === homeTeam ? homeSeed : awaySeed;
+                    const lSeed   = winner === homeTeam ? awaySeed : homeSeed;
+
+                    // Supporting calendars
+                    const suppCals = TAPE_CAL_KEYS.filter(c => {
+                        const ws = wTS.calScores[c], ls = lTS.calScores[c];
+                        return ws >= 15 && (ws - ls) >= 8;
+                    });
+                    const calCount = suppCals.length;
+                    const confPct  = Math.min(95, Math.round(50 + (margin/120)*40) + (calCount >= 5 ? 18 : calCount >= 4 ? 12 : calCount >= 3 ? 7 : 0));
+
+                    // Vegas line from odds
+                    let vegasSpread = null, vegasTotal = null;
+                    try {
+                        const odds = (comp.odds || [])[0];
+                        if (odds) {
+                            vegasSpread = parseFloat(odds.spread) || null;
+                            vegasTotal  = parseFloat(odds.overUnder) || null;
+                        }
+                    } catch(e) {}
+
+                    const pick = {
+                        winner, loser, homeTeam, awayTeam, wSeed, lSeed,
+                        winnerTS: wTS, loserTS: lTS, margin, suppCals, calCount, confPct,
+                        vegasSpread, vegasTotal, gameTime,
+                        sportEmoji: '🏀', sport: 'cbb'
+                    };
+
+                    // ML: require 3+ supporting cals
+                    if (calCount >= 3 && margin >= 12) mmPicks.push(pick);
+
+                    // O/U: VW intensity signal
+                    // High combined VW (both teams hot) → OVER lean
+                    // Low combined VW (cold game) → UNDER lean
+                    if (vegasTotal) {
+                        const combinedVW = homeTS.total + awayTS.total;
+                        const ouDir = combinedVW >= 800 ? 'OVER' : combinedVW <= 500 ? 'UNDER' : null;
+                        if (ouDir) {
+                            mmOUPicks.push({ ...pick, ouDir,
+                                label: ouDir + ' ' + vegasTotal + ' — ' + awayTeam + ' @ ' + homeTeam,
+                                confidence: combinedVW >= 900 ? 80 : combinedVW >= 800 ? 72 : 68,
+                                type: 'ou', sportEmoji: '🏀'
+                            });
+                        }
+                    }
+
+                    // ATS: if VW margin strongly favors underdog (seed mismatch potential)
+                    if (vegasSpread !== null) {
+                        const vegasFav = vegasSpread < 0 ? homeTeam : awayTeam;
+                        const vwFav    = winner;
+                        if (vegasFav !== vwFav && calCount >= 3) {
+                            // VW says underdog wins — ATS upset pick
+                            mmATSPicks.push({ ...pick,
+                                label: winner + ' +' + Math.abs(vegasSpread) + ' (VW upset: ' + calCount + ' cals vs Vegas fav)',
+                                confidence: Math.min(82, confPct),
+                                type: 'ats', sportEmoji: '🏀', edge: Math.abs(vegasSpread)
+                            });
+                        }
+                    }
+                }
+
+                if (mmPicks.length > 0 || mmOUPicks.length > 0 || mmATSPicks.length > 0) {
+                    // Sort by cal count then confPct
+                    mmPicks.sort((a,b) => b.calCount - a.calCount || b.confPct - a.confPct);
+                    mmOUPicks.sort((a,b) => b.confidence - a.confidence);
+                    mmATSPicks.sort((a,b) => b.confidence - a.confidence);
+
+                    mmHtml += '<div style="background:#0a0d16;border:2px solid #a78bfa;border-radius:10px;padding:20px;margin-bottom:20px;">';
+                    mmHtml += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">';
+                    mmHtml += '<div style="font-size:18px;font-weight:900;color:#a78bfa;">🏆 MARCH MADNESS CBB PARLAYS</div>';
+                    mmHtml += '<div style="background:#a78bfa22;border:1px solid #a78bfa55;border-radius:4px;padding:2px 8px;font-size:10px;color:#a78bfa;font-weight:700;">' + mmEvents.length + ' GAMES TODAY</div>';
+                    mmHtml += '</div>';
+                    mmHtml += '<div style="font-size:11px;color:#4a5568;margin-bottom:16px;">VW-scored moneyline · ATS upset alerts · O/U intensity signals · All based on team cipher matches across 9 calendars</div>';
+
+                    // MM ML Parlays
+                    if (mmPicks.length > 0) {
+                        const mmTopPicks = mmPicks.slice(0, 6);
+                        mmHtml += '<div style="font-size:12px;font-weight:800;color:#a78bfa;margin-bottom:8px;border-bottom:1px solid #1a1535;padding-bottom:4px;">🏀 MONEYLINE PICKS (' + mmTopPicks.length + ' games)</div>';
+                        mmTopPicks.forEach((p, i) => {
+                            const cc = p.confPct >= 80 ? '#10b981' : p.confPct >= 70 ? '#f59e0b' : '#667eea';
+                            const calBadge = p.calCount >= 6 ? '#ff6b35' : p.calCount >= 5 ? '#f59e0b' : p.calCount >= 4 ? '#10b981' : '#667eea';
+                            const seedStr = p.wSeed ? '(#' + p.wSeed + ')' : '';
+                            const oppSeedStr = p.lSeed ? '(#' + p.lSeed + ')' : '';
+                            const timeStr = p.gameTime.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
+                            mmHtml += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #0f1020;">';
+                            mmHtml += '<span style="color:#4a5568;font-size:11px;min-width:16px;">' + (i+1) + '.</span>';
+                            mmHtml += '<div style="flex:1;">';
+                            mmHtml += '<span style="font-weight:700;color:#fff;font-size:12px;">' + p.winner + ' ' + seedStr + '</span>';
+                            mmHtml += '<span style="color:#4a5568;font-size:11px;"> vs ' + p.loser + ' ' + oppSeedStr + '</span>';
+                            mmHtml += '<div style="margin-top:2px;display:flex;gap:4px;align-items:center;">';
+                            mmHtml += '<span style="background:' + calBadge + ';color:#fff;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;">' + p.calCount + ' CALS</span>';
+                            mmHtml += '<span style="font-size:9px;color:#4a5568;">' + timeStr + '</span>';
+                            mmHtml += '</div></div>';
+                            mmHtml += '<span style="font-weight:800;color:' + cc + ';font-size:13px;">' + p.confPct + '%</span>';
+                            mmHtml += '</div>';
+                        });
+                    }
+
+                    // MM ATS Upset Picks
+                    if (mmATSPicks.length > 0) {
+                        mmHtml += '<div style="font-size:12px;font-weight:800;color:#f59e0b;margin:14px 0 8px;border-bottom:1px solid #1a1535;padding-bottom:4px;">⚡ ATS UPSET ALERTS (' + mmATSPicks.length + ')</div>';
+                        mmATSPicks.slice(0, 4).forEach((p, i) => {
+                            const timeStr = p.gameTime.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
+                            mmHtml += '<div style="padding:7px 0;border-bottom:1px solid #0f1020;">';
+                            mmHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                            mmHtml += '<span style="font-weight:700;color:#f59e0b;font-size:12px;">' + (i+1) + '. ' + p.label + '</span>';
+                            mmHtml += '<span style="color:#f59e0b;font-weight:800;">' + p.confidence + '%</span>';
+                            mmHtml += '</div>';
+                            mmHtml += '<div style="font-size:9px;color:#4a5568;margin-top:2px;">' + p.calCount + ' cals back VW underdog · ' + timeStr + '</div>';
+                            mmHtml += '</div>';
+                        });
+                    }
+
+                    // MM O/U Picks
+                    if (mmOUPicks.length > 0) {
+                        mmHtml += '<div style="font-size:12px;font-weight:800;color:#06b6d4;margin:14px 0 8px;border-bottom:1px solid #1a1535;padding-bottom:4px;">🎯 O/U INTENSITY PICKS (' + mmOUPicks.length + ')</div>';
+                        mmOUPicks.slice(0, 4).forEach((p, i) => {
+                            const dc = p.ouDir === 'OVER' ? '#10b981' : '#3b82f6';
+                            const timeStr = p.gameTime.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
+                            mmHtml += '<div style="padding:7px 0;border-bottom:1px solid #0f1020;">';
+                            mmHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                            mmHtml += '<div>';
+                            mmHtml += '<span style="background:' + dc + ';color:#fff;padding:1px 7px;border-radius:3px;font-size:10px;font-weight:700;">' + p.ouDir + '</span>';
+                            mmHtml += '<span style="color:#fff;font-size:12px;margin-left:6px;">' + p.label + '</span>';
+                            mmHtml += '</div>';
+                            mmHtml += '<span style="color:' + dc + ';font-weight:800;">' + p.confidence + '%</span>';
+                            mmHtml += '</div>';
+                            mmHtml += '<div style="font-size:9px;color:#4a5568;margin-top:2px;">Combined VW: ' + (p.winnerTS.total + p.loserTS.total) + ' · ' + timeStr + '</div>';
+                            mmHtml += '</div>';
+                        });
+                    }
+
+                    mmHtml += '</div>';
+                }
+            } catch(e) {
+                console.warn('MM parlay fetch error:', e.message);
+            }
+
+            // Prepend MM section to parlay output
+            if (mmHtml) html = mmHtml + html;
+
             parlayDiv.innerHTML = html;
         }
         
@@ -14199,10 +14389,15 @@ function _showBracketTable() {
                 // 5. A+B AGREE (V2 differs): both modes agree but V2 disagrees
                 // 6. V2+V4 SPLIT: merged V4 and V2 pick different teams
                 // 7. V4 only: no V2 data
-                if (p.allThreeLock) {
+                if (p.allThreeLock && p.tripleAlign) {
+                    // All 4 agree: V4 Mode A, V4 Mode B, V2, AND Vegas
                     alignBadges = sideBadge('🔒','ALL-3 LOCK','ALL-3 LOCK','#fff','#0d2010','#10b98188') +
                         ' ' + sideBadge('🔐','TRIPLE LOCK','TRIPLE LOCK','#10b981','#0d2010','#10b98155');
+                } else if (p.allThreeLock) {
+                    // V4 A + V4 B + V2 agree — Vegas differs or absent
+                    alignBadges = sideBadge('🔒','ALL-3 LOCK','ALL-3 LOCK','#fff','#0d2010','#10b98188');
                 } else if (p.tripleAlign) {
+                    // Merged V4 + V2 + Vegas agree (modes may differ internally)
                     alignBadges = sideBadge('🔐','TRIPLE LOCK','TRIPLE LOCK','#10b981','#0d2010','#10b98155');
                 } else if (p.upsetAlert) {
                     alignBadges = sideBadge('⚡','UPSET ALERT','UPSET ALERT','#f59e0b','#1a1000','#f59e0b55');
