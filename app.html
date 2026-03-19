@@ -664,7 +664,20 @@
 
             .sport-tabs {
                 width: 100%;
-                justify-content: center;
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                justify-content: flex-start;
+                flex-wrap: nowrap;
+                scrollbar-width: none;  /* hide scrollbar Firefox */
+                padding-bottom: 4px;
+            }
+            .sport-tabs::-webkit-scrollbar { display: none; } /* hide scrollbar Safari */
+            .sport-tab {
+                padding: 8px 14px;
+                font-size: 12px;
+                white-space: nowrap;
+                flex-shrink: 0;
             }
         }
 
