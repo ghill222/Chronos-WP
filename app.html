@@ -1604,6 +1604,7 @@
                 <button class="sport-tab" data-sport="gematria" onclick="switchToGematriaLab()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none;">🔮 Gematria Lab</button>
                 <button class="sport-tab" data-sport="accuracy" onclick="switchToAccuracy()">📊 Accuracy</button>
                 <button class="sport-tab" data-sport="pulse" onclick="switchToPulse()" style="background:linear-gradient(135deg,#0f4c2a 0%,#1a3a5c 100%);border:none;">🌊 Pulse</button>
+                <button onclick="openKalshiSettings()" title="Kalshi prediction market integration settings" style="background:linear-gradient(135deg,#1a0a2e,#0a1428);border:1px solid #667eea55;color:#a78bfa;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;white-space:nowrap;margin-left:4px;">⚙️ Kalshi</button>
             </div>
             <div class="status">
                 <div class="status-dot"></div>
@@ -5172,6 +5173,14 @@ function lookupTeam(teamName) {
                         quadLock:     trackQuadLock,
                         trapFlag:     trackTrapFlag,
                         trapTier:     trackTrapTier,
+                        v4WinnerScore: (function(){
+                            try {
+                                var rs=gameData.result&&gameData.result.predictedSpread,rt=gameData.result&&gameData.result.predictedTotal;
+                                if(rs==null||rt==null||isNaN(rs)||isNaN(rt)) return null;
+                                var hb=(rt-rs)/2, wb=gameData.homeWon?hb:(rt-hb);
+                                return Math.round((rt*0.54)*10)/10; // approx winner share
+                            } catch(e){return null;}
+                        })(),
                         skipPatternPick:   (function(){ try { var r=computeSkipPatternPick(gameData.homeTeam,gameData.awayTeam,sport); return r?r.pick:null; } catch(e){return null;} })(),
                         skipPatternMethod: (function(){ try { var r=computeSkipPatternPick(gameData.homeTeam,gameData.awayTeam,sport); return r?r.method:null; } catch(e){return null;} })(),
                         v2v4agree:    trackV4V2Agree,
@@ -5672,21 +5681,93 @@ function lookupTeam(teamName) {
                 if (prediction.vegasSpread !== null) {
                     const vegasSpreadError = Math.abs(prediction.vegasSpread - prediction.actualSpread);
                     prediction.beatVegasSpread = prediction.spreadError < vegasSpreadError;
+
+                    // ── Cover Result ──
+                    // vegasSpread convention: negative = home favored (e.g. -6.5 means home -6.5)
+                    // actualSpread = finalAwayScore - finalHomeScore
+                    // Home covers if: actualSpread < vegasSpread (home wins by more than the line, or loses by less)
+                    // Away covers if: actualSpread > vegasSpread
+                    const vs = parseFloat(prediction.vegasSpread);
+                    const as_ = prediction.actualSpread; // away - home
+                    if (!isNaN(vs)) {
+                        prediction.homeCoversVegas = as_ < vs;  // home beat the spread
+                        prediction.awayCoversVegas = as_ > vs;  // away beat the spread
+                        prediction.pushSpread       = as_ === vs;
+
+                        // Did V4's predicted winner cover?
+                        const v4HomeTeam = prediction.homeTeam;
+                        const v4WinnerIsHome = prediction.v4Winner === v4HomeTeam ||
+                            (prediction.v4Winner && v4HomeTeam && prediction.v4Winner.split(' ').pop() === v4HomeTeam.split(' ').pop());
+                        prediction.v4PickCoveredSpread = v4WinnerIsHome ? prediction.homeCoversVegas : prediction.awayCoversVegas;
+
+                        // Did V2's predicted winner cover? (predictedSpread < 0 = home favored in V2)
+                        const v2HomeWin = prediction.predictedSpread < 0;
+                        prediction.v2PickCoveredSpread = v2HomeWin ? prediction.homeCoversVegas : prediction.awayCoversVegas;
+                    }
                 } else {
                     prediction.beatVegasSpread = null;
+                    prediction.homeCoversVegas = null;
+                    prediction.awayCoversVegas = null;
+                    prediction.v4PickCoveredSpread = null;
+                    prediction.v2PickCoveredSpread = null;
                 }
                 
                 if (prediction.vegasTotal !== null) {
                     const vegasTotalError = Math.abs(prediction.vegasTotal - prediction.actualTotal);
                     prediction.beatVegasTotal = prediction.totalError < vegasTotalError;
+
+                    // ── O/U Result ──
+                    const vt = parseFloat(prediction.vegasTotal);
+                    if (!isNaN(vt)) {
+                        prediction.actualOver  = prediction.actualTotal > vt;
+                        prediction.actualUnder = prediction.actualTotal < vt;
+                        prediction.pushTotal   = prediction.actualTotal === vt;
+
+                        // Did V4 total correctly call over/under?
+                        if (prediction.v4Total != null) {
+                            const v4CallsOver = prediction.v4Total > vt;
+                            prediction.v4TotalCorrect = v4CallsOver === prediction.actualOver && !prediction.pushTotal;
+                        } else {
+                            prediction.v4TotalCorrect = null;
+                        }
+
+                        // Did V2 total correctly call over/under?
+                        if (prediction.predictedTotal != null) {
+                            const v2CallsOver = prediction.predictedTotal > vt;
+                            prediction.v2TotalCorrect = v2CallsOver === prediction.actualOver && !prediction.pushTotal;
+                        } else {
+                            prediction.v2TotalCorrect = null;
+                        }
+                    }
                 } else {
                     prediction.beatVegasTotal = null;
+                    prediction.actualOver  = null;
+                    prediction.actualUnder = null;
+                    prediction.v4TotalCorrect = null;
+                    prediction.v2TotalCorrect = null;
                 }
                 
                 // Move to results
                 this.results.set(gameId, prediction);
                 this.predictions.delete(gameId);
                 this.saveToStorage();
+
+                // Auto-resolve any My Picks for this game
+                try {
+                    const mp = loadMyPicks();
+                    let mpUpdated = false;
+                    mp.forEach(function(pick) {
+                        if (pick.gameId !== gameId || pick.result) return;
+                        const won = prediction.homeWon
+                            ? (pick.pickedTeam === prediction.homeTeam || pick.pickedTeam.split(' ').pop() === prediction.homeTeam.split(' ').pop())
+                            : (pick.pickedTeam === prediction.awayTeam || pick.pickedTeam.split(' ').pop() === prediction.awayTeam.split(' ').pop());
+                        pick.result = won ? 'WIN' : 'LOSS';
+                        pick.actualWinner = prediction.homeWon ? prediction.homeTeam : prediction.awayTeam;
+                        pick.resolvedAt = Date.now();
+                        mpUpdated = true;
+                    });
+                    if (mpUpdated) saveMyPicks(mp);
+                } catch(e) {}
                 
                 console.log(`✅ OUTCOME RECORDED (${source}):`);
                 console.log(`   ${prediction.homeTeam} ${finalHomeScore} - ${prediction.awayTeam} ${finalAwayScore}`);
@@ -9309,6 +9390,220 @@ function _showBracketTable() {
             } catch(e) { return 'N/A'; }
         }
         
+        // ══════════════════════════════════════════════════════════════════
+        // KALSHI INTEGRATION
+        // Market data: public endpoint — no auth required
+        // Trading/portfolio: RSA-PSS signed — uses stored key
+        // ══════════════════════════════════════════════════════════════════
+        const KALSHI_SETTINGS_KEY = 'chronos_kalshi_settings';
+        const KALSHI_PUBLIC_BASE  = 'https://api.elections.kalshi.com/trade-api/v2';
+        const KALSHI_API_BASE     = 'https://api.kalshi.com/trade-api/v2';
+
+        function loadKalshiSettings() {
+            try { return JSON.parse(localStorage.getItem(KALSHI_SETTINGS_KEY) || '{}'); }
+            catch(e) { return {}; }
+        }
+        function saveKalshiSettings(s) {
+            try { localStorage.setItem(KALSHI_SETTINGS_KEY, JSON.stringify(s)); } catch(e) {}
+        }
+
+        // ── Settings modal ──
+        window.openKalshiSettings = function() {
+            const s = loadKalshiSettings();
+            const existing = document.getElementById('kalshi-settings-modal');
+            if (existing) { existing.remove(); return; } // toggle
+
+            const modal = document.createElement('div');
+            modal.id = 'kalshi-settings-modal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#000000cc;z-index:9999;display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = `
+            <div style="background:#0d1018;border:1px solid #667eea55;border-radius:10px;padding:28px;width:500px;max-width:94vw;max-height:90vh;overflow-y:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+                    <div>
+                        <div style="font-size:16px;font-weight:800;color:#fff;">⚙️ Kalshi Integration</div>
+                        <div style="font-size:11px;color:#4a5568;margin-top:2px;">Market data is public — no key needed. Key enables future portfolio features.</div>
+                    </div>
+                    <button onclick="document.getElementById('kalshi-settings-modal').remove()" style="background:none;border:none;color:#4a5568;font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label style="font-size:11px;color:#8b92a7;font-weight:700;display:block;margin-bottom:4px;">KEY ID <span style="color:#4a5568;font-weight:400;">(UUID from Kalshi profile)</span></label>
+                    <input id="kalshi-key-id-input" type="text" value="${s.keyId||''}" placeholder="e.g. a952bcbe-ec3b-4b5b-b8f9-..." style="width:100%;box-sizing:border-box;padding:9px 12px;background:#0a0e15;border:1px solid #2a3142;border-radius:5px;color:#e8e8e8;font-size:12px;font-family:monospace;">
+                </div>
+                <div style="margin-bottom:18px;">
+                    <label style="font-size:11px;color:#8b92a7;font-weight:700;display:block;margin-bottom:4px;">PRIVATE KEY <span style="color:#4a5568;font-weight:400;">(RSA PEM from downloaded .txt file)</span></label>
+                    <textarea id="kalshi-private-key-input" rows="7" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----" style="width:100%;box-sizing:border-box;padding:9px 12px;background:#0a0e15;border:1px solid #2a3142;border-radius:5px;color:#e8e8e8;font-size:11px;font-family:monospace;resize:vertical;">${s.privateKey||''}</textarea>
+                    <div style="font-size:10px;color:#4a5568;margin-top:3px;">⚠️ Stored only in this browser's localStorage. Never sent anywhere.</div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button onclick="(function(){
+                        var kid=document.getElementById('kalshi-key-id-input').value.trim();
+                        var pk=document.getElementById('kalshi-private-key-input').value.trim();
+                        saveKalshiSettings({keyId:kid,privateKey:pk});
+                        document.getElementById('kalshi-settings-modal').remove();
+                        if(window._kalshiStatusEl) window._kalshiStatusEl.textContent='✅ Saved';
+                    })()" style="background:#10b98122;border:1px solid #10b98155;color:#10b981;padding:8px 20px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;">💾 Save</button>
+                    <button onclick="(function(){
+                        saveKalshiSettings({});
+                        document.getElementById('kalshi-key-id-input').value='';
+                        document.getElementById('kalshi-private-key-input').value='';
+                    })()" style="background:#ef444411;border:1px solid #ef444433;color:#ef4444;padding:8px 16px;border-radius:5px;cursor:pointer;font-size:12px;">Clear</button>
+                </div>
+                <div style="margin-top:14px;padding:10px 12px;background:#0a0e15;border:1px solid #1a2535;border-radius:5px;">
+                    <div style="font-size:10px;font-weight:700;color:#a78bfa;margin-bottom:4px;">What Kalshi adds to Chronos-WP</div>
+                    <div style="font-size:10px;color:#4a5568;line-height:1.6;">
+                        🎾 Tennis & 🥊 MMA match markets with implied win probabilities<br>
+                        🏀 NBA / 🏒 NHL market odds alongside V4 + V2 predictions<br>
+                        📊 Market consensus % as a 4th signal on the Matchup Board<br>
+                        🔮 Future: portfolio balance, position tracking (requires key)
+                    </div>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+            modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+        };
+
+        // ── Kalshi public market fetch — no auth required ──
+        window.fetchKalshiMarkets = async function(category) {
+            // Market data is public — no auth needed.
+            // allorigins.win proxy bypasses CORS for null-origin (file://) and GitHub Pages.
+            const targetUrl = KALSHI_PUBLIC_BASE + '/events?with_nested_markets=true&status=open&limit=200';
+            const proxyUrl  = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl);
+
+            // Try direct first (works when served from a real domain with CORS allowed),
+            // fall back to proxy if blocked
+            const attempts = [targetUrl, proxyUrl];
+            for (const url of attempts) {
+                try {
+                    const resp = await fetch(url);
+                    if (!resp.ok) continue;
+                    const data = await resp.json();
+                    const events = data.events || data.contents && JSON.parse(data.contents).events || [];
+                    if (events.length >= 0) return events; // success (even empty is valid)
+                } catch(e) {
+                    console.warn('Kalshi fetch attempt failed (' + url.substring(0,40) + '...):', e.message);
+                }
+            }
+            return null; // both failed
+        };
+
+        // ── Parse Kalshi market into usable format ──
+        // yes_bid_dollars is the market-implied probability of YES outcome (winning)
+        // For "Will X win?" markets, YES = X wins, price ≈ probability
+        function parseKalshiMarket(mkt) {
+            const yesBid  = parseFloat(mkt.yes_bid_dollars  || '0');
+            const yesAsk  = parseFloat(mkt.yes_ask_dollars  || '0');
+            const midpoint = (yesBid + yesAsk) / 2 || yesBid || yesAsk;
+            return {
+                ticker:      mkt.ticker,
+                title:       mkt.title || mkt.subtitle || '',
+                yesPct:      Math.round(midpoint * 100),  // 0.65 → 65%
+                noPct:       Math.round((1 - midpoint) * 100),
+                status:      mkt.status,
+                closeTime:   mkt.close_time,
+                yesBid, yesAsk
+            };
+        }
+
+        // ── Render Kalshi section for Tennis/MMA tab ──
+        window.renderKalshiTapeSection = async function(sport, containerId) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            el.innerHTML = '<div style="color:#8b92a7;font-size:12px;padding:12px;text-align:center;">⏳ Fetching Kalshi markets...</div>';
+
+            const events = await fetchKalshiMarkets('Sports');
+
+            if (events === null) {
+                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">' +
+                    '⚠️ Could not reach Kalshi — possible CORS restriction from GitHub Pages. ' +
+                    'Markets are readable via direct browser access to the app file.</div>';
+                return;
+            }
+            if (events.length === 0) {
+                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">No open Kalshi markets found.</div>';
+                return;
+            }
+
+            // Filter events relevant to this sport
+            const keywords = sport === 'tennis'
+                ? ['tennis','atp','wta','wimbledon','miami','open','roland','australian','us open','match']
+                : ['mma','ufc','fight','bout','fighter'];
+
+            const relevant = events.filter(function(ev) {
+                const t = (ev.title||'').toLowerCase() + ' ' + (ev.sub_title||'').toLowerCase() + ' ' + (ev.series_ticker||'').toLowerCase();
+                return keywords.some(function(k){ return t.includes(k); });
+            });
+
+            if (relevant.length === 0) {
+                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">No ' + sport + ' markets currently open on Kalshi.</div>';
+                return;
+            }
+
+            let html = '';
+            relevant.forEach(function(ev) {
+                const markets = ev.markets || [];
+                if (!markets.length) return;
+
+                html += '<div style="border:1px solid #1a2535;border-radius:6px;padding:10px 12px;margin-bottom:8px;background:#080c12;">';
+                html += '<div style="font-size:11px;font-weight:800;color:#a78bfa;margin-bottom:6px;">' + (ev.title||ev.event_ticker) + '</div>';
+
+                markets.slice(0,4).forEach(function(mkt) {
+                    const m = parseKalshiMarket(mkt);
+                    if (!m.yesPct && !m.noPct) return;
+                    const confCol = m.yesPct >= 65 ? '#10b981' : m.yesPct >= 50 ? '#3b82f6' : '#f59e0b';
+                    const barW = Math.max(5, Math.min(95, m.yesPct));
+
+                    html += '<div style="margin-bottom:6px;">';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">';
+                    html += '<span style="font-size:11px;color:#e8e8e8;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + m.title + '">' + m.title + '</span>';
+                    html += '<span style="font-size:12px;font-weight:800;color:' + confCol + ';margin-left:8px;white-space:nowrap;">' + m.yesPct + '% YES</span>';
+                    html += '</div>';
+                    // Probability bar
+                    html += '<div style="height:4px;background:#1a2535;border-radius:2px;overflow:hidden;">';
+                    html += '<div style="height:100%;width:' + barW + '%;background:' + confCol + ';border-radius:2px;transition:width 0.3s;"></div>';
+                    html += '</div>';
+                    html += '</div>';
+                });
+
+                html += '</div>';
+            });
+
+            el.innerHTML = html || '<div style="color:#4a5568;font-size:11px;padding:10px;">No market data available.</div>';
+        };
+
+        // ── Attach Kalshi odds to gameWPs for matchup board ──
+        window.enrichGameWPsWithKalshi = async function() {
+            const events = await fetchKalshiMarkets('Sports');
+            if (!events) return;
+            window._kalshiEventsCache = events;
+            // Build a lookup: lowercase team name fragment → implied probability
+            window._kalshiOddsMap = {};
+            events.forEach(function(ev) {
+                (ev.markets||[]).forEach(function(mkt) {
+                    const title = (mkt.title||'').toLowerCase();
+                    const m = parseKalshiMarket(mkt);
+                    if (m.yesPct > 0) window._kalshiOddsMap[title] = m;
+                });
+            });
+        };
+
+        // ── Get Kalshi implied probability for a team in a matchup ──
+        window.getKalshiOdds = function(teamA, teamB) {
+            const cache = window._kalshiOddsMap;
+            if (!cache) return null;
+            const aLow = teamA.toLowerCase().split(' ').pop(); // mascot
+            const bLow = teamB.toLowerCase().split(' ').pop();
+            // Look for a market title containing both teams or one team win question
+            for (const [title, mkt] of Object.entries(cache)) {
+                if (title.includes(aLow) && (title.includes('win') || title.includes('beat') || title.includes('advance'))) {
+                    return { team: teamA, pct: mkt.yesPct, title: mkt.title };
+                }
+                if (title.includes(bLow) && (title.includes('win') || title.includes('beat') || title.includes('advance'))) {
+                    return { team: teamB, pct: mkt.yesPct, title: mkt.title };
+                }
+            }
+            return null;
+        };
+
         function switchToGematriaLab() {
             console.log('🔮 Gematria Lab button clicked');
             
@@ -9484,6 +9779,18 @@ function _showBracketTable() {
             html += '<div id="tape-schedule"><div style="color: #8b92a7; font-size: 13px; text-align: center; padding: 24px;">⏳ Loading today\'s schedule from ESPN...</div></div>';
             html += '</div>';
 
+            // ── KALSHI MARKETS ZONE ──
+            html += '<div style="background: #0d1018; border: 1px solid #667eea33; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">';
+            html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
+            html += '<div>';
+            html += '<h2 style="color:#a78bfa;margin:0;font-size:15px;font-weight:800;">📈 Kalshi Prediction Markets</h2>';
+            html += '<div style="font-size:10px;color:#4a5568;margin-top:2px;">Market-implied win probabilities from CFTC-regulated prediction market</div>';
+            html += '</div>';
+            html += '<button onclick="renderKalshiTapeSection(\'' + sport + '\',\'kalshi-tape-markets\')" style="padding:5px 12px;background:#667eea22;border:1px solid #667eea55;border-radius:4px;color:#a78bfa;font-size:10px;font-weight:700;cursor:pointer;">🔄 Refresh</button>';
+            html += '</div>';
+            html += '<div id="kalshi-tape-markets"><div style="color:#4a5568;font-size:11px;text-align:center;padding:8px;">Click Refresh to load Kalshi markets</div></div>';
+            html += '</div>';
+
             // ── BOTTOM ZONE: Manual Calculator ──
             html += '<div id="tape-manual-section" style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 24px; margin-bottom: 20px;">';
             html += '<h2 style="color: #fff; margin: 0 0 4px 0; font-size: 17px;">' + emoji + ' Manual — Tale of the Tape</h2>';
@@ -9492,7 +9799,17 @@ function _showBracketTable() {
             // Player A
             html += '<div style="background: #0f1419; border: 1px solid #1e3a5f; border-radius: 6px; padding: 16px;">';
             html += '<div style="color: #3b82f6; font-weight: 700; font-size: 13px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">🔵 ' + pALabel + '</div>';
-            html += '<input id="tape-name-a" type="text" placeholder="' + pAPlace + '" onblur="if(this.value.trim()&&!document.getElementById(\'tape-dob-a\').value)lookupBirthdateWiki(\'tape-name-a\',\'tape-dob-a\')" style="width: 100%; box-sizing: border-box; padding: 10px; background: #0a0e15; border: 1px solid #2a3142; border-radius: 4px; color: #e8e8e8; font-size: 13px; margin-bottom: 10px;">';
+            html += '<input id="tape-name-a" type="text" placeholder="' + pAPlace + '"' +
+                ' oninput="(function(){' +
+                    'var d=document.getElementById(\'tape-dob-a\');' +
+                    'var s=document.getElementById(\'tape-dob-a-status\');' +
+                    'if(d){d.value=\'\';}' +
+                    'if(s){s.innerHTML=\'\';}' +
+                    'var r=document.getElementById(\'tape-results\');' +
+                    'if(r){r.innerHTML=\'\';}' +
+                '})()"' +
+                ' onblur="if(this.value.trim()&&!document.getElementById(\'tape-dob-a\').value)lookupBirthdateWiki(\'tape-name-a\',\'tape-dob-a\')"' +
+                ' style="width: 100%; box-sizing: border-box; padding: 10px; background: #0a0e15; border: 1px solid #2a3142; border-radius: 4px; color: #e8e8e8; font-size: 13px; margin-bottom: 10px;">';
             html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">';
             html += '<label style="color: #4a5568; font-size: 11px; flex:1;">Date of Birth (optional)</label>';
             html += '<button onclick="lookupBirthdateWiki(\'tape-name-a\',\'tape-dob-a\')" title="Look up birthdate on Wikipedia" style="padding:3px 8px;background:#1e3a5f;border:1px solid #2a5298;border-radius:4px;color:#93c5fd;font-size:10px;cursor:pointer;white-space:nowrap;">🔍 Wiki DOB</button>';
@@ -9505,7 +9822,17 @@ function _showBracketTable() {
             // Player B
             html += '<div style="background: #0f1419; border: 1px solid #5f1e1e; border-radius: 6px; padding: 16px;">';
             html += '<div style="color: #ef4444; font-weight: 700; font-size: 13px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">🔴 ' + pBLabel + '</div>';
-            html += '<input id="tape-name-b" type="text" placeholder="' + pBPlace + '" onblur="if(this.value.trim()&&!document.getElementById(\'tape-dob-b\').value)lookupBirthdateWiki(\'tape-name-b\',\'tape-dob-b\')" style="width: 100%; box-sizing: border-box; padding: 10px; background: #0a0e15; border: 1px solid #2a3142; border-radius: 4px; color: #e8e8e8; font-size: 13px; margin-bottom: 10px;">';
+            html += '<input id="tape-name-b" type="text" placeholder="' + pBPlace + '"' +
+                ' oninput="(function(){' +
+                    'var d=document.getElementById(\'tape-dob-b\');' +
+                    'var s=document.getElementById(\'tape-dob-b-status\');' +
+                    'if(d){d.value=\'\';}' +
+                    'if(s){s.innerHTML=\'\';}' +
+                    'var r=document.getElementById(\'tape-results\');' +
+                    'if(r){r.innerHTML=\'\';}' +
+                '})()"' +
+                ' onblur="if(this.value.trim()&&!document.getElementById(\'tape-dob-b\').value)lookupBirthdateWiki(\'tape-name-b\',\'tape-dob-b\')"' +
+                ' style="width: 100%; box-sizing: border-box; padding: 10px; background: #0a0e15; border: 1px solid #2a3142; border-radius: 4px; color: #e8e8e8; font-size: 13px; margin-bottom: 10px;">';
             html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">';
             html += '<label style="color: #4a5568; font-size: 11px; flex:1;">Date of Birth (optional)</label>';
             html += '<button onclick="lookupBirthdateWiki(\'tape-name-b\',\'tape-dob-b\')" title="Look up birthdate on Wikipedia" style="padding:3px 8px;background:#3f1a1a;border:1px solid #7f2929;border-radius:4px;color:#fca5a5;font-size:10px;cursor:pointer;white-space:nowrap;">🔍 Wiki DOB</button>';
@@ -9524,12 +9851,21 @@ function _showBracketTable() {
             html += '<span style="font-size:9px;color:#4a5568;white-space:nowrap;" title="Adding game start time aligns Mode A cipher calculation with the sidebar — use when checking a specific scheduled game">⏰ = sidebar alignment</span>';
             html += '<button onclick="(function(){var d=document.getElementById(\'tape-game-date\');if(!d.value)return;var dt=new Date(d.value+\'T12:00:00\');dt.setDate(dt.getDate()+1);d.value=dt.toISOString().split(\'T\')[0];})()" title="Next day" style="padding:3px 9px;background:#1a2535;border:1px solid #2a3142;border-radius:4px;color:#93c5fd;font-size:13px;cursor:pointer;">▶</button>';
             html += '<button onclick="runTapeCalculator()" style="padding: 12px 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; letter-spacing: .5px;">⚖️ Run Tale of the Tape</button>';
+            html += '<button onclick="(function(){' +
+                '[\'tape-name-a\',\'tape-name-b\'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=\'\';});' +
+                '[\'tape-dob-a\',\'tape-dob-b\'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=\'\';});' +
+                '[\'tape-dob-a-status\',\'tape-dob-b-status\'].forEach(function(id){var el=document.getElementById(id);if(el)el.innerHTML=\'\';});' +
+                'var r=document.getElementById(\'tape-results\');if(r)r.innerHTML=\'\';' +
+                'document.getElementById(\'tape-name-a\').focus();' +
+            '})()" style="padding: 12px 20px; background: #1a2535; border: 1px solid #2a3142; border-radius: 6px; color: #8b92a7; font-weight: 700; font-size: 13px; cursor: pointer;">↺ Reset</button>';
             html += '</div>';
             html += '</div>';
             html += '<div id="tape-results"></div>';
             html += '</div>';
             content.innerHTML = html;
             fetchTapeSchedule(sport);
+            // Auto-load Kalshi markets for tennis/mma
+            setTimeout(function(){ renderKalshiTapeSection(sport, 'kalshi-tape-markets'); }, 300);
         }
 
         // ── Pre-fill manual form from an ESPN card click and scroll down ──
@@ -9961,26 +10297,22 @@ function _showBracketTable() {
                 String(today.getMonth() + 1).padStart(2, '0') +
                 String(today.getDate()).padStart(2, '0');
 
+            var BASE_ATP = 'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard';
+            var BASE_WTA = 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard';
+            var BASE_GEN = 'https://site.api.espn.com/apis/site/v2/sports/tennis/scoreboard';
+
+            // ESPN tennis endpoints — league= param is NOT supported (returns 400).
+            // Only base scoreboard URLs work. Try dated first, then undated fallbacks.
             var tennisEndpoints = [
-                // Standard scoreboards (current + date-filtered)
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard?dates=' + todayStr,
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard?dates=' + todayStr,
-                // Tournament-level: Miami Open (active Mar 16 – Apr 4, 2026)
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard?league=miami',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard?league=miami',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard?league=miami-open',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard?league=miami-open',
-                // Tournament-level: Indian Wells (previous event)
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard?league=indian-wells',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard?league=indian-wells',
-                // ESPN v3 API alternative
-                'https://site.api.espn.com/apis/v2/sports/tennis/atp/scoreboard',
-                'https://site.api.espn.com/apis/v2/sports/tennis/wta/scoreboard',
-                // Broader sports API
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/scoreboard',
-                'https://site.api.espn.com/apis/site/v2/sports/tennis/scoreboard?dates=' + todayStr
+                // Dated (most specific — returns today's matches if any)
+                BASE_ATP + '?dates=' + todayStr,
+                BASE_WTA + '?dates=' + todayStr,
+                BASE_GEN + '?dates=' + todayStr,
+                // Undated base (returns current/active tournament)
+                BASE_ATP,
+                BASE_WTA,
+                BASE_GEN,
+                // Note: apis/v2/ ESPN endpoints blocked from null origin (file://) — removed
             ];
 
             for (var tIdx = 0; tIdx < tennisEndpoints.length; tIdx++) {
@@ -10272,12 +10604,7 @@ function _showBracketTable() {
                              margin <= 90 ? 'CLEAR EDGE' : 'DOMINANT ADVANTAGE';
 
             // ── Mode A (Conviction Engine) — supplementary layer ──
-            // Run predictGameWinner to get the strongest cipher lock per player.
-            // NEVER overrides tape winner. Only used to:
-            //   (a) boost confidence when it agrees with tape winner
-            //   (b) show a dissent note when it picks the opponent
             var modeAResult = null;
-            // Use game datetime if entered — matches sidebar Mode A calculation
             var _modeATime = (typeof _tapeDateObj !== 'undefined') ? _tapeDateObj : new Date();
             try { modeAResult = predictGameWinner(pA.name, pB.name, _modeATime); } catch(e) {}
             var modeAWinnerName = modeAResult ? modeAResult.winner : null;
@@ -10285,11 +10612,76 @@ function _showBracketTable() {
             var modeAConvLabel  = modeAResult && modeAResult.winnerConviction
                 ? modeAResult.winnerConviction.label.replace(/[🔑🏛️🎯⚡📊🔮〰️🔢]/gu,'').trim() : '';
             var modeACalendar   = modeAResult ? (modeAResult.winnerCalendar || '') : '';
-            // Determine tape winner name for comparison
-            var tapeWinnerName = winner === 'A' ? pA.name : winner === 'B' ? pB.name : null;
-            var modeAAgrees    = tapeWinnerName && modeAWinnerName && modeAWinnerName === tapeWinnerName;
-            var modeADissents  = tapeWinnerName && modeAWinnerName && modeAWinnerName !== tapeWinnerName;
-            // Store on window for saveTapePrediction tracking
+            var tapeWinnerName  = winner === 'A' ? pA.name : winner === 'B' ? pB.name : null;
+            var modeAAgrees     = tapeWinnerName && modeAWinnerName && modeAWinnerName === tapeWinnerName;
+            var modeADissents   = tapeWinnerName && modeAWinnerName && modeAWinnerName !== tapeWinnerName;
+
+            // ── Mode A order-independence check ──
+            var modeAResultRev = null;
+            try { modeAResultRev = predictGameWinner(pB.name, pA.name, _modeATime); } catch(e) {}
+            var modeAConsistent = modeAResult && modeAResultRev && modeAResult.winner === modeAResultRev.winner;
+            if (!modeAConsistent) { modeAWinnerName = null; modeAConvPct = 0; } // inconsistent → discard
+
+            // ── Merge rules (same logic as sidebar) ──
+            var mergedWinner = null, mergedRule = null, mergedRuleTag = null;
+            var modesAgree = modeAWinnerName && tapeWinnerName && modeAWinnerName === tapeWinnerName;
+            if (!modeAWinnerName) {
+                mergedWinner = tapeWinnerName; mergedRule = 'R_INCONSISTENT'; mergedRuleTag = '〰️ A inconsistent→B';
+            } else if (modesAgree) {
+                mergedWinner = tapeWinnerName; mergedRule = 'AGREE'; mergedRuleTag = null;
+            } else if (margin >= 100) {
+                mergedWinner = tapeWinnerName; mergedRule = 'R1:A'; mergedRuleTag = '📐 Margin≥100→A';
+            } else if (margin < 30) {
+                mergedWinner = modeAWinnerName; mergedRule = 'R2:B'; mergedRuleTag = '〰️ Margin<30→B';
+            } else if (modeAConvPct >= 96) {
+                mergedWinner = modeAWinnerName; mergedRule = 'R4:B'; mergedRuleTag = '⚡ Conv96+→B';
+            } else {
+                mergedWinner = tapeWinnerName; mergedRule = 'R3:A'; mergedRuleTag = '📊 Med→A';
+            }
+            // Use merged winner as final V4 pick
+            var finalV4Winner = mergedWinner || tapeWinnerName;
+
+            // ── DNA Skip-Pattern Pick ──
+            var dnaResult = null, dnaPick = null, dnaMethod = null;
+            try {
+                var currentTapeSport = document.querySelector('.sport-tab.active') ? document.querySelector('.sport-tab.active').getAttribute('data-sport') : 'tennis';
+                dnaResult = computeSkipPatternPick(pA.name, pB.name, currentTapeSport);
+                if (dnaResult) { dnaPick = dnaResult.pick; dnaMethod = dnaResult.method; }
+            } catch(e) {}
+            var dnaAgreesV4  = dnaPick && finalV4Winner && dnaPick === finalV4Winner;
+            var dnaDisagreesV4 = dnaPick && finalV4Winner && dnaPick !== finalV4Winner;
+
+            // ── Trap Matrix ──
+            var trapResult = null, trapTier = null, trapFlag = null;
+            try {
+                var tapeTeams = [pA.name, pB.name];
+                var tapeRank = computeDayResonanceRanking(_modeATime, tapeTeams);
+                trapResult = computeGameTrapTier(pA.name, pB.name, currentTapeSport, _modeATime, tapeRank);
+                trapTier = trapResult.tier;
+                trapFlag = trapResult.gateType;
+            } catch(e) {}
+
+            // ── Lopsided detection — how many calendars does winner dominate by 10+ pts ──
+            var winnerScoreObj = winner === 'A' ? scoreA : scoreB;
+            var loserScoreObj  = winner === 'A' ? scoreB : scoreA;
+            var dominantCals = 0;
+            calKeys.forEach(function(ck) {
+                var ww = winnerScoreObj.calStats[ck] ? winnerScoreObj.calStats[ck].weighted : 0;
+                var ll = loserScoreObj.calStats[ck]  ? loserScoreObj.calStats[ck].weighted  : 0;
+                if (ww > 0 && (ww - ll) >= 10) dominantCals++;
+            });
+            var isLopsided = dominantCals >= 4;
+
+            // ── Day resonance leading calendars ──
+            var todayResonance = [];
+            try { todayResonance = computeDayResonanceRanking(_modeATime, [pA.name, pB.name]); } catch(e) {}
+            var top3Cals = todayResonance.slice(0,3);
+
+            // ── Alignment badges ──
+            var allThreeLock = modesAgree && dnaAgreesV4;
+            var tripleAlign  = modesAgree && !dnaAgreesV4;
+            var upsetSignal  = (trapTier === 1) && !modesAgree;
+
             window._lastTapeModeA = { winner: modeAWinnerName, convPct: modeAConvPct,
                                        label: modeAConvLabel, cal: modeACalendar,
                                        agrees: modeAAgrees };
@@ -10322,27 +10714,11 @@ function _showBracketTable() {
             out += '<span style="color: #8b92a7; font-size: 11px;">Cipher Score: 🔵 ' + scoreA.cipherScore + ' vs 🔴 ' + scoreB.cipherScore + '</span>';
             out += '<span style="color: #8b92a7; font-size: 11px;">Birthdate Score: 🔵 ' + scoreA.bdScore + ' vs 🔴 ' + scoreB.bdScore + '</span>';
             out += '<span style="color: #fbbf24; font-size: 11px;">💎 Masters: 🔵 ' + scoreA.masterCount + ' vs 🔴 ' + scoreB.masterCount + '</span>';
-            // Show winner confidence % in the tape output
-            // Base tape confidence (Mode B share)
-            var tapeConf = (scoreA.totalWeighted + scoreB.totalWeighted) > 0
-                ? Math.round(Math.max(scoreA.totalWeighted, scoreB.totalWeighted) / (scoreA.totalWeighted + scoreB.totalWeighted) * 100)
-                : 50;
-            // Boost if Mode A agrees: +3% at conv 75-84%, +5% at conv 85-95%, +8% at conv 96%+
-            var modeABoost = 0;
-            if (modeAAgrees && winner !== 'TIE') {
-                modeABoost = modeAConvPct >= 96 ? 8 : modeAConvPct >= 85 ? 5 : modeAConvPct >= 75 ? 3 : 1;
-            }
-            var finalConf = Math.min(99, tapeConf + modeABoost);
-            var confColor = finalConf >= 65 ? '#10b981' : finalConf >= 55 ? '#3b82f6' : '#f59e0b';
-            out += ' &nbsp; <span style="color:' + confColor + ';font-size:11px;font-weight:700;">📊 Confidence: ' + finalConf + '%' +
-                   (modeABoost > 0 ? ' <span style="font-size:9px;color:#a78bfa;">(+' + modeABoost + '% Mode A)</span>' : '') +
-                   '</span>';
             out += '</div>';
 
             // ── Mode A conviction block ──
             if (winner !== 'TIE' && modeAResult) {
                 if (modeAAgrees) {
-                    // Agreement — show as reinforcement badge
                     var aColor = modeAConvPct >= 85 ? '#10b981' : modeAConvPct >= 70 ? '#3b82f6' : '#a78bfa';
                     out += '<div style="margin-top:10px;padding:8px 12px;background:#0d1a0d;border:1px solid #10b98144;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
                     out += '<span style="font-size:10px;font-weight:800;color:#10b981;">✅ MODE A CONFIRMS</span>';
@@ -10351,17 +10727,106 @@ function _showBracketTable() {
                     out += '<span style="font-size:10px;color:#4a5568;">via ' + modeACalendar.replace(/_/g,' ').toUpperCase() + '</span>';
                     out += '</div>';
                 } else if (modeADissents) {
-                    // Dissent — show as a caution note, never changing the winner
-                    var dColor = '#f59e0b';
                     out += '<div style="margin-top:10px;padding:8px 12px;background:#1a1200;border:1px solid #f59e0b44;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
                     out += '<span style="font-size:10px;font-weight:800;color:#f59e0b;">⚠️ MODE A DISSENTS</span>';
                     out += '<span style="font-size:10px;color:#8b92a7;">Conviction engine picks</span>';
                     out += '<span style="font-size:11px;color:#f59e0b;font-weight:700;">' + modeAWinnerName + '</span>';
                     out += '<span style="font-size:10px;color:#f59e0b;background:#0a0e1a;border:1px solid #f59e0b44;border-radius:3px;padding:1px 6px;">' + modeAConvPct + '% — ' + modeAConvLabel + '</span>';
-                    out += '<span style="font-size:10px;color:#4a5568;">via ' + modeACalendar.replace(/_/g,' ').toUpperCase() + ' · tracked for comparison</span>';
+                    out += '<span style="font-size:10px;color:#4a5568;">via ' + modeACalendar.replace(/_/g,' ').toUpperCase() + '</span>';
                     out += '</div>';
                 }
             }
+
+            // ── Full Signal Panel — mirrors sidebar badge row ──
+            out += '<div style="margin-top:12px;padding:10px 12px;background:#080c12;border:1px solid #1a2535;border-radius:6px;">';
+            out += '<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Signal Panel</div>';
+            out += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">';
+
+            // Alignment badge
+            if (allThreeLock) {
+                out += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;">🔒 ALL-3 LOCK — V4+DNA+ModeA agree</span>';
+            } else if (tripleAlign) {
+                out += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;">🔐 TRIPLE — V4+ModeA agree</span>';
+            } else if (modesAgree) {
+                out += '<span style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">🤝 A+B AGREE</span>';
+            } else if (modeAWinnerName) {
+                out += '<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">⚠️ V2+V4 SPLIT — engines disagree</span>';
+            }
+
+            // Merge rule tag
+            if (mergedRuleTag) {
+                var ENGINE_RULE_TIPS_T = {
+                    'R_INCONSISTENT': 'Mode A produced different winners depending on player order — signal discarded. Mode B (VW Tape) leads.',
+                    'R1:A': 'Tape margin 100+ pts — Mode A historically outperforms at this separation.',
+                    'R2:B': 'Tape margin <30 pts — too close for Mode A. Mode B leads.',
+                    'R4:B': 'Mode A at 96%+ conviction — Mode B historically more accurate in these cases.',
+                    'R3:A': 'Medium margin, Mode A default (50% historical vs 46% Mode B).'
+                };
+                var rtip = (ENGINE_RULE_TIPS_T[mergedRule]||'').replace(/"/g,'&quot;');
+                out += '<span class="chronos-tip" data-tip="' + rtip + '" style="background:#0a0e1a;border:1px solid #667eea33;color:#667eea;font-size:9px;padding:1px 6px;border-radius:3px;cursor:help;">' + mergedRuleTag + '</span>';
+            }
+
+            // DNA badge
+            if (dnaPick) {
+                var dnaCol = dnaAgreesV4 ? '#a78bfa' : '#f59e0b';
+                var dnaTag = dnaAgreesV4 ? '✓V4' : '≠V4';
+                out += '<span style="background:' + dnaCol + '22;border:1px solid ' + dnaCol + '44;color:' + dnaCol + ';font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">🧬 DNA: ' + dnaPick.split(' ').pop() + ' ' + dnaTag + '</span>';
+            }
+
+            // Lopsided badge
+            if (isLopsided) {
+                out += '<span style="background:#ff6b3522;border:1px solid #ff6b3555;color:#ff6b35;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;" title="Winner dominates ' + dominantCals + ' of 9 calendars by 10+ pts">🔥 LOPSIDED (' + dominantCals + ' cals)</span>';
+            }
+
+            // Trap tier badge
+            if (trapTier === 1) {
+                out += '<span style="background:#ef444422;border:1px solid #ef444455;color:#ef4444;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;">☠️ VOID LOCK — UPSET SIGNAL</span>';
+            } else if (trapTier === 2) {
+                out += '<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">⚡ TRAP T2 — WATCH</span>';
+            } else if (trapTier === 3) {
+                out += '<span style="background:#1a2030;border:1px solid #2a3142;color:#8b92a7;font-size:10px;padding:2px 8px;border-radius:4px;">〰️ LATENT TRAP</span>';
+            } else if (trapFlag) {
+                var tfCol = trapFlag==='EXTREME' ? '#ef4444' : '#f59e0b';
+                out += '<span style="background:' + tfCol + '22;border:1px solid ' + tfCol + '44;color:' + tfCol + ';font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">⚠️ ' + trapFlag + '</span>';
+            }
+
+            // Mode A conviction badge (when it fired)
+            if (modeAWinnerName && modeAConvLabel) {
+                var convCol = modeAConvPct >= 95 ? '#8b5cf6' : modeAConvPct >= 85 ? '#10b981' : modeAConvPct >= 70 ? '#3b82f6' : '#4a5568';
+                out += '<span style="background:' + convCol + '22;border:1px solid ' + convCol + '44;color:' + convCol + ';font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;" title="V4 Mode A conviction signal">' + modeAConvPct + '% ' + modeAConvLabel + '</span>';
+            }
+
+            // Confidence %
+            var tapeConf = (scoreA.totalWeighted + scoreB.totalWeighted) > 0
+                ? Math.round(Math.max(scoreA.totalWeighted, scoreB.totalWeighted) / (scoreA.totalWeighted + scoreB.totalWeighted) * 100)
+                : 50;
+            var modeABoost = modeAAgrees && winner !== 'TIE'
+                ? (modeAConvPct >= 96 ? 8 : modeAConvPct >= 85 ? 5 : modeAConvPct >= 75 ? 3 : 1)
+                : 0;
+            var trapPenalty = trapTier === 1 ? -8 : trapTier === 2 ? -4 : 0;
+            var finalConf   = Math.min(99, Math.max(51, tapeConf + modeABoost + trapPenalty));
+            var confColor   = finalConf >= 70 ? '#10b981' : finalConf >= 60 ? '#3b82f6' : '#f59e0b';
+            out += '<span style="color:' + confColor + ';font-size:11px;font-weight:800;margin-left:4px;">📊 ' + finalConf + '%' +
+                   (modeABoost > 0 ? '<span style="font-size:9px;color:#a78bfa;"> +' + modeABoost + '%A</span>' : '') +
+                   (trapPenalty < 0 ? '<span style="font-size:9px;color:#ef4444;"> ' + trapPenalty + '%T</span>' : '') +
+                   '</span>';
+
+            out += '</div>'; // end signal badges row
+
+            // Day resonance leading calendars
+            if (top3Cals.length > 0) {
+                var CAL_SHORT_TAPE = { gregorian:'Greg', ancient_roman:'AncR', unc:'UNC', ifc:'IFC',
+                    ethiopian:'Eth', pure_sol:'PureSOL', future_gregorian:'SOL',
+                    future_gregorian_plus2:'FutG', gemini_rolling:'G-Roll' };
+                out += '<div style="margin-top:8px;font-size:10px;color:#4a5568;">Today resonance leaders: ';
+                top3Cals.forEach(function(r, i) {
+                    var col = r.isTrap ? '#f59e0b' : '#10b981';
+                    out += '<span style="color:' + col + ';font-weight:700;">' + (CAL_SHORT_TAPE[r.cal]||r.cal) + ' DPM=' + r.dpm + (r.isTrap?' ⚡':'') + '</span>';
+                    if (i < top3Cals.length-1) out += ' · ';
+                });
+                out += '</div>';
+            }
+            out += '</div>'; // end signal panel
             // Save Prediction button — passes scores by value via data attrs
             var currentSportForTape = document.querySelector('.sport-tab.active') ? document.querySelector('.sport-tab.active').getAttribute('data-sport') : 'tennis';
             out += '<div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid ' + bannerColor + '33;">';
@@ -10373,6 +10838,13 @@ function _showBracketTable() {
             // Store full score objects globally so saveTapePrediction can read cipher/bd/etc.
             window._lastTapeScoreA = scoreA;
             window._lastTapeScoreB = scoreB;
+            // Store new signal globals
+            window._lastTapeMerge = { rule: mergedRule, ruleTag: mergedRuleTag, winner: finalV4Winner,
+                modesAgree: modesAgree, allThreeLock: allThreeLock, tripleAlign: tripleAlign };
+            window._lastTapeDNA   = { pick: dnaPick, method: dnaMethod };
+            window._lastTapeTrap  = { tier: trapTier, flag: trapFlag };
+            window._lastTapeLopsided = { lopsided: isLopsided, count: dominantCals };
+            window._lastTapeConf  = finalConf;
             out += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">';
             out += '<span style="color:#8b92a7;font-size:11px;font-weight:700;">SAVE AS SPORT:</span>';
             var sportOptions = [
@@ -10697,7 +11169,6 @@ function _showBracketTable() {
                 predictedHomeWP:  wpA,
                 predictedSpread:  null,
                 predictedTotal:   null,
-                // Confidence = winner's share of total VW score
                 confidence:       total > 0 ? Math.round(Math.max(scoreA, scoreB) / total * 100) : 50,
                 modelVersion:     'V4-Tape',
                 vegasSpread:      null,
@@ -10709,12 +11180,10 @@ function _showBracketTable() {
                 lastFetchAttempt: null,
                 tapeScoreA:       scoreA,
                 tapeScoreB:       scoreB,
-                // Retrieve full score objects stored by runTapeCalculator
                 tapeCipherA:      (window._lastTapeScoreA || {}).cipherScore || 0,
                 tapeCipherB:      (window._lastTapeScoreB || {}).cipherScore || 0,
                 tapeBdA:          (window._lastTapeScoreA || {}).bdScore || 0,
                 tapeBdB:          (window._lastTapeScoreB || {}).bdScore || 0,
-                // VW margin as predicted spread (VW units)
                 predictedSpread:  Math.round((scoreA - scoreB) * 10) / 10,
                 tapeTopCalsA:     (window._lastTapeScoreA || {}).topCals || [],
                 tapeTopCalsB:     (window._lastTapeScoreB || {}).topCals || [],
@@ -10724,11 +11193,32 @@ function _showBracketTable() {
                     var m = Math.abs(scoreA - scoreB);
                     return m <= 20 ? 'TOO CLOSE' : m <= 45 ? 'SLIGHT' : m <= 70 ? 'MODERATE' : m <= 90 ? 'CLEAR' : 'DOMINANT';
                 })(),
-                // Mode A conviction data — tracked for comparison, never overrides tape winner
+                // Mode A
                 modeAWinner:      (window._lastTapeModeA || {}).winner || null,
                 modeAConvPct:     (window._lastTapeModeA || {}).convPct || 0,
                 modeAConvLabel:   (window._lastTapeModeA || {}).label || null,
-                modeAAgrees:      (window._lastTapeModeA || {}).agrees || false
+                modeAAgrees:      (window._lastTapeModeA || {}).agrees || false,
+                // ── New signal fields ──
+                mergedRule:       (window._lastTapeMerge || {}).rule       || null,
+                mergedRuleTag:    (window._lastTapeMerge || {}).ruleTag    || null,
+                mergedWinner:     (window._lastTapeMerge || {}).winner     || null,
+                modesAgree:       (window._lastTapeMerge || {}).modesAgree || false,
+                allThreeLock:     (window._lastTapeMerge || {}).allThreeLock || false,
+                tripleAlign:      (window._lastTapeMerge || {}).tripleAlign  || false,
+                // DNA skip pattern
+                skipPatternPick:  (window._lastTapeDNA || {}).pick    || null,
+                skipPatternMethod:(window._lastTapeDNA || {}).method  || null,
+                // Trap matrix
+                trapTier:         (window._lastTapeTrap || {}).tier   || null,
+                trapFlag:         (window._lastTapeTrap || {}).flag   || null,
+                // Lopsided
+                isLopsided:       (window._lastTapeLopsided || {}).lopsided || false,
+                dominantCals:     (window._lastTapeLopsided || {}).count    || 0,
+                // Final adjusted confidence
+                tapeConfFinal:    (window._lastTapeConf || 0) || (total > 0 ? Math.round(Math.max(scoreA, scoreB) / total * 100) : 50),
+                // V4 winner = merged winner (best pick)
+                v4Winner:         (window._lastTapeMerge || {}).winner || (scoreA >= scoreB ? playerA : playerB),
+                v4ConvictionPct:  (window._lastTapeConf || 0)
             };
 
             accuracyTracker.predictions.set(gameId, record);
@@ -11088,12 +11578,12 @@ function _showBracketTable() {
                         const margin     = Math.abs(homeTS.total - awayTS.total);
 
                         // ── PARLAY STRINGENCY FILTER ─────────────────────────────────────────────
-                        // A pick only enters the parlay pool if ALL three conditions hold:
-                        //   1. Winner supported by 3+ calendars at score >= 40 pts each
-                        //   2. Winner tape margin >= 30 VW pts (clear domination)
-                        //   3. Winner scores at least 8% more than loser overall
-                        // These three gates together give approximately 3x confidence over
-                        // a random pick. Games passing all three are genuinely strong signals.
+                        // A pick only enters the parlay pool if ALL conditions hold:
+                        //   1. Winner supported by 3+ calendars at dominant score
+                        //   2. Winner tape margin >= 15 VW pts
+                        //   3. Winner scores 4%+ more than loser
+                        //   4. V2 and V4 agree on the winner (NEW)
+                        //   5. Vegas spread is present (filters Spring Training MLB etc) (NEW)
                         const calThreshold  = 20;   // calendar score threshold (loosened from 40)
                         const minMargin     = 15;   // minimum VW point gap (loosened from 30)
                         const minRatio      = 1.04; // winner scores 4%+ more than loser (loosened from 8%)
@@ -11108,8 +11598,28 @@ function _showBracketTable() {
                         const calCount = supportingCals.length;
                         const scoreRatio = loserTS.total > 0 ? winnerTS.total / loserTS.total : 2;
 
-                        // Skip if doesn't pass all three gates (3-cal minimum kept for quality)
+                        // Gate 1-3: calendar count, margin, score ratio
                         if (calCount < 3 || margin < minMargin || scoreRatio < minRatio) continue;
+                        // Gate 4: V2 and V4 must agree on winner
+                        // (locks bypass this — lock detection already ran above with its own criteria)
+                        const _parlayV2 = (function() {
+                            try {
+                                if (sport === 'nba' || sport === 'cbb') {
+                                    const br = getBasketballModelSpread(homeTeam, awayTeam, sport);
+                                    if (br && br.modelSpread != null) return br.modelSpread <= 0 ? homeTeam : awayTeam;
+                                } else {
+                                    const mr = getModelRatingsForGame(homeTeam, awayTeam, sport);
+                                    if (mr && mr.modelSpread != null) return mr.modelSpread <= 0 ? homeTeam : awayTeam;
+                                }
+                            } catch(e) {}
+                            return null;
+                        })();
+                        if (!_parlayV2 || _parlayV2 !== tapeWinner) continue; // V2+V4 must agree
+                        // Gate 5: Vegas spread must be present (filters MLB Spring Training etc)
+                        const _parlayVegas = (comp.odds || [])[0];
+                        const _parlaySpread = _parlayVegas && _parlayVegas.spread != null ? _parlayVegas.spread
+                            : (_parlayVegas && _parlayVegas.details ? parseFloat(String(_parlayVegas.details).replace(/[^0-9.+-]/g,'')) : NaN);
+                        if (isNaN(_parlaySpread) || _parlaySpread === 0) continue; // no spread = skip
 
                         // Multi-cal bonus — tighter scale now that cals are genuinely distinct wins
                         const multiCalBonus = calCount >= 6 ? 20 :
@@ -12486,7 +12996,7 @@ function _showBracketTable() {
             html += '<div style="max-height:50vh;overflow-y:auto;-webkit-overflow-scrolling:touch;">';
             html += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
             html += '<thead><tr style="background:#0f1520;position:sticky;top:0;">';
-            ['Sport','Matchup','Predicted','Skip Pick','Actual','Result','Calendar','Conf%'].forEach(function(h) {
+            ['Sport','Matchup','Predicted','Skip Pick','Actual','Result','Cover','O/U','Calendar','Conf%'].forEach(function(h) {
                 html += '<th style="padding:8px 10px;color:#8b92a7;font-weight:700;text-align:left;border-bottom:1px solid #1a2535;">' + h + '</th>';
             });
             html += '</tr></thead><tbody>';
@@ -12505,13 +13015,46 @@ function _showBracketTable() {
                 const skipCorrect = g.skipPatternPick && g.skipPatternPick === skipAct;
                 const skipLabel = g.skipPatternPick ? (g.skipPatternPick.split(' ').pop() + (g.skipPatternMethod?' <span style="color:#4a5568;font-size:9px;">'+g.skipPatternMethod+'</span>':'')) : '<span style="color:#2a3142;">—</span>';
                 const skipCol = g.skipPatternPick ? (skipCorrect ? '#10b981' : '#ef4444') : '#2a3142';
+
+                // For tape matches, show extra signal info in the predicted column
+                let predDisplay = (pred||'').split(' ').pop();
+                if (g.isTapeMatch) {
+                    const signals = [];
+                    if (g.allThreeLock) signals.push('<span style="color:#10b981;font-size:8px;font-weight:800;">🔒ALL3</span>');
+                    else if (g.tripleAlign) signals.push('<span style="color:#10b981;font-size:8px;">🔐TRP</span>');
+                    else if (g.modesAgree) signals.push('<span style="color:#a78bfa;font-size:8px;">🤝A+B</span>');
+                    if (g.isLopsided) signals.push('<span style="color:#ff6b35;font-size:8px;">🔥LSP</span>');
+                    if (g.trapTier===1) signals.push('<span style="color:#ef4444;font-size:8px;">☠T1</span>');
+                    else if (g.trapTier===2) signals.push('<span style="color:#f59e0b;font-size:8px;">⚡T2</span>');
+                    if (signals.length) predDisplay += ' ' + signals.join(' ');
+                }
                 html += '<tr style="background:' + rowCol + ';border-bottom:1px solid #0f1520;">';
                 html += '<td style="padding:7px 10px;color:#8b92a7;">' + (g.sport||'').toUpperCase() + '</td>';
                 html += '<td style="padding:7px 10px;color:#fff;">' + (g.awayTeam||'').split(' ').pop() + ' @ ' + (g.homeTeam||'').split(' ').pop() + '</td>';
-                html += '<td style="padding:7px 10px;color:#a78bfa;">' + (pred||'').split(' ').pop() + '</td>';
+                html += '<td style="padding:7px 10px;color:#a78bfa;">' + predDisplay + '</td>';
                 html += '<td style="padding:7px 10px;color:' + skipCol + ';font-weight:700;">' + skipLabel + '</td>';
                 html += '<td style="padding:7px 10px;color:#fff;">' + (act||'').split(' ').pop() + '</td>';
                 html += '<td style="padding:7px 10px;color:' + resCol + ';font-weight:800;">' + resLabel + '</td>';
+                // Cover result
+                const coverLabel = g.v4PickCoveredSpread === true ? '✅ CVR'
+                    : g.v4PickCoveredSpread === false ? '❌ NO'
+                    : g.pushSpread ? '〰️ PSH' : '—';
+                const coverCol = g.v4PickCoveredSpread === true ? '#10b981'
+                    : g.v4PickCoveredSpread === false ? '#ef4444' : '#4a5568';
+                const coverTip = g.vegasSpread != null
+                    ? 'Vegas spread: ' + g.vegasSpread + ' | Actual margin: ' + (g.actualSpread != null ? (g.actualSpread*-1).toFixed(1) + ' (home)' : '—')
+                    : 'No Vegas spread available';
+                html += '<td style="padding:7px 10px;color:' + coverCol + ';font-weight:700;" title="' + coverTip + '">' + coverLabel + '</td>';
+                // O/U result
+                const ouLabel = g.actualOver ? '⬆️ OVR'
+                    : g.actualUnder ? '⬇️ UND'
+                    : g.pushTotal ? '〰️ PSH' : '—';
+                const ouCol = g.actualOver ? '#f59e0b' : g.actualUnder ? '#8b5cf6' : '#4a5568';
+                const v4TotalTag = g.v4TotalCorrect === true ? ' ✓V4' : g.v4TotalCorrect === false ? ' ✗V4' : '';
+                const ouTip = g.vegasTotal != null
+                    ? 'Vegas O/U: ' + g.vegasTotal + ' | Actual: ' + (g.actualTotal || '—') + (g.v4Total ? ' | V4 predicted: ' + g.v4Total.toFixed(1) : '')
+                    : 'No Vegas total available';
+                html += '<td style="padding:7px 10px;color:' + ouCol + ';font-weight:700;" title="' + ouTip + '">' + ouLabel + v4TotalTag + '</td>';
                 html += '<td style="padding:7px 10px;color:#60a5fa;">' + calLabel + '</td>';
                 html += '<td style="padding:7px 10px;color:#4a5568;">' + conf + '</td>';
                 html += '</tr>';
@@ -12524,6 +13067,576 @@ function _showBracketTable() {
 
         // ── Badge Accuracy Report ─────────────────────────────────────────────────
         // Shows W/L accuracy for every badge/flag type across all stored game records
+        // ── My Picks — Matchup Board ──────────────────────────────────────────────
+        // Loads all games currently in gameWPs, shows V4/V2/DNA picks, badges,
+        // and lets the user pick their own winner. Picks are stored in localStorage
+        // under 'chronos_my_picks' and tracked with their own W/L record.
+
+        const MY_PICKS_KEY = 'chronos_my_picks_v1';
+
+        function loadMyPicks() {
+            try { return JSON.parse(localStorage.getItem(MY_PICKS_KEY) || '[]'); }
+            catch(e) { return []; }
+        }
+        function saveMyPicks(picks) {
+            try { localStorage.setItem(MY_PICKS_KEY, JSON.stringify(picks)); } catch(e) {}
+        }
+
+        window.submitMyPick = function(gameId, pickedTeam, homeTeam, awayTeam, sport, gameTimeStr) {
+            const picks = loadMyPicks();
+            const existing = picks.findIndex(function(p){ return p.gameId === gameId; });
+            const rec = { gameId, pickedTeam, homeTeam, awayTeam, sport,
+                gameTime: gameTimeStr, savedAt: Date.now(),
+                result: null, actualWinner: null };
+            if (existing >= 0) picks[existing] = rec;
+            else picks.push(rec);
+            saveMyPicks(picks);
+            renderMatchupBoard(); // re-render to show selection
+        };
+
+        window._matchupSportFilter = window._matchupSportFilter || 'ALL';
+
+        window.setMatchupSport = function(sp) {
+            window._matchupSportFilter = sp;
+            window.renderMatchupBoard();
+        };
+
+        window.renderMatchupBoard = function() {
+            const container = document.getElementById('content');
+            if (!container) return;
+
+            const myPicksData = loadMyPicks();
+            const todayLabel = new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+            const activeSportFilter = window._matchupSportFilter || 'ALL';
+
+            // ── Source ALL sports: merge pulseState.poolGames + gameWPs ──
+            // This ensures we see every sport regardless of which tab is active
+            const rawSources = [];
+            const seen = new Set();
+
+            // Primary: pulseState pool (all-sport background fetch)
+            const pool = window.pulseState && window.pulseState.poolGames ? window.pulseState.poolGames : {};
+            Object.entries(pool).forEach(function([gid, pg]) {
+                if (!pg.homeTeam || !pg.awayTeam) return;
+                if (seen.has(gid)) return; seen.add(gid);
+                // Prefer gwEntry.data.startTime (most reliable) over pool's stored time
+                const _gwe = gameWPs.get ? gameWPs.get(gid) : null;
+                const _gweTime = _gwe && _gwe.data && _gwe.data.startTime ? _gwe.data.startTime : null;
+                const _rawTime = _gweTime || pg.startTime;
+                const gStart = _rawTime ? new Date(_rawTime) : null; // null = no time known yet
+                rawSources.push({ gid, ht: pg.homeTeam, at: pg.awayTeam,
+                    sp: (pg.sport||'').toUpperCase(), gt: gStart,
+                    isFinal: pg.status==='post', isLive: pg.status==='in',
+                    gwEntry: _gwe });
+            });
+
+            // Secondary: gameWPs (current tab — fills in whatever pool missed)
+            gameWPs.forEach(function(gd, gid) {
+                if (!gd.data||!gd.data.homeTeam||!gd.data.awayTeam) return;
+                if (seen.has(gid)) return; seen.add(gid);
+                const gt = gd.data.startTime ? new Date(gd.data.startTime) : new Date();
+                rawSources.push({ gid, ht: gd.data.homeTeam, at: gd.data.awayTeam,
+                    sp: (gd.sport||'').toUpperCase(), gt,
+                    isFinal: gd.data.isFinal===true, isLive: gd.data.isLive===true,
+                    gwEntry: gd });
+            });
+
+            // ── Get unique sports present ──
+            const sportsPresent = ['ALL'];
+            rawSources.forEach(function(s) { if (s.sp && !sportsPresent.includes(s.sp)) sportsPresent.push(s.sp); });
+
+            // ── Apply sport filter ──
+            const filtered = activeSportFilter === 'ALL'
+                ? rawSources
+                : rawSources.filter(function(s){ return s.sp === activeSportFilter; });
+
+            // ── Build game objects ──
+            const games = [];
+            const todayStr = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+
+            filtered.forEach(function(src) {
+                const { gid, ht, at, sp, gt, isFinal, isLive, gwEntry } = src;
+                const timeStr = gt ? gt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
+                const dateKey = gt ? gt.getFullYear()+'-'+String(gt.getMonth()+1).padStart(2,'0')+'-'+String(gt.getDate()).padStart(2,'0') : todayStr;
+                const dateLabel = gt ? gt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : todayLabel;
+                const isGameToday = dateKey === todayStr;
+
+                // ── V4 pick — use stored sidebar data if available, else compute fresh ──
+                let v4pick = null, v4pct = null, trapFlag = null, trapTier = null;
+                let allThreeLock = false, tripleAlign = false, upsetAlert = false, quadLock = false;
+                if (gwEntry) {
+                    v4pick     = gwEntry._tapeWinner || null;
+                    v4pct      = gwEntry._blendedPct || null;
+                    trapFlag   = gwEntry._trapFlag   || null;
+                    allThreeLock = gwEntry._allThreeLock || false;
+                    tripleAlign  = gwEntry._tripleAlign  || false;
+                }
+                // If V4 not computed yet from sidebar, compute it now via scoreTeamVW
+                if (!v4pick) {
+                    try {
+                        const allVW = calculateAllCalendarsVW(gt || new Date());
+                        const homeTS = scoreTeamVW(ht, allVW);
+                        const awayTS = scoreTeamVW(at, allVW);
+                        v4pick = homeTS.total >= awayTS.total ? ht : at;
+                        const margin = Math.abs(homeTS.total - awayTS.total);
+                        v4pct = Math.min(97, Math.round(50 + (margin / 120) * 45));
+                    } catch(e) {}
+                }
+                // Compute trap tier fresh
+                try {
+                    const teams = [];
+                    rawSources.forEach(function(s2){
+                        var d2k = s2.gt ? s2.gt.getFullYear()+'-'+String(s2.gt.getMonth()+1).padStart(2,'0')+'-'+String(s2.gt.getDate()).padStart(2,'0') : todayStr;
+                        if (d2k===dateKey) { teams.push(s2.ht, s2.at); }
+                    });
+                    const rank = computeDayResonanceRanking(gt||new Date(), teams);
+                    const tr = computeGameTrapTier(ht, at, sp.toLowerCase(), gt||new Date(), rank);
+                    trapTier = tr.tier;
+                } catch(e) {}
+
+                // ── V2 pick ──
+                let v2pick = null;
+                try {
+                    if (sp==='NBA'||sp==='CBB') {
+                        const br = getBasketballModelSpread(ht,at,sp.toLowerCase());
+                        if (br&&br.modelSpread!=null) v2pick = br.modelSpread<=0?ht:at;
+                    } else {
+                        const mr = getModelRatingsForGame(ht,at,sp.toLowerCase());
+                        if (mr&&mr.modelSpread!=null) v2pick = mr.modelSpread<=0?ht:at;
+                    }
+                } catch(e) {}
+
+                // ── DNA pick ──
+                let dnaPick = null, dnaMethod = null;
+                try {
+                    const dr = computeSkipPatternPick(ht, at, sp.toLowerCase());
+                    if (dr) { dnaPick=dr.pick; dnaMethod=dr.method; }
+                } catch(e) {}
+
+                // ── Vegas fav ──
+                let vegasFav = null;
+                try {
+                    if (gwEntry&&gwEntry.data&&gwEntry.data.odds) {
+                        const odds=(gwEntry.data.odds||[])[0]||gwEntry.data.odds;
+                        if (odds&&odds.spread!=null) { const vs=parseFloat(odds.spread); if(!isNaN(vs)) vegasFav=vs<0?ht:at; }
+                    }
+                } catch(e) {}
+
+                // ── Agreement flags ──
+                const v4v2agree  = v4pick&&v2pick  ? v4pick===v2pick  : null;
+                const v4dnaAgree = v4pick&&dnaPick ? v4pick===dnaPick : null;
+                const allAgree   = v4pick&&v2pick&&dnaPick && v4pick===v2pick && v2pick===dnaPick;
+
+                // ── My pick ──
+                const myPick = myPicksData.find(function(p){ return p.gameId===gid; });
+
+                // ── Derive badge flags fresh from all available signals ──
+                // gwEntry._* fields only exist when sidebar rendered for that sport tab.
+                // Re-derive from computed v4/v2/vegas so all sports get badges.
+                const v4v2VegasAll = v4pick && v2pick && vegasFav && v4pick===v2pick && v4pick===vegasFav;
+                const v4v2Only     = v4pick && v2pick && v4pick===v2pick;
+                const v4VegasOnly  = v4pick && vegasFav && v4pick===vegasFav;
+                const derivedQuad        = (quadLock||false)       || v4v2VegasAll;
+                const derivedAllThreeLock= (allThreeLock||false)   || v4v2Only;
+                const derivedTripleAlign = (tripleAlign||false)    || (v4VegasOnly && !v4v2Only);
+                const derivedUpset = (upsetAlert||false) || (v4pick && v2pick && vegasFav && v4pick===v2pick && v4pick!==vegasFav);
+
+                games.push({ gid, ht, at, sp, timeStr, dateKey, dateLabel, isGameToday,
+                    isFinal, isLive, gt, v4pick, v4pct, v2pick, dnaPick, dnaMethod,
+                    vegasFav, trapFlag, trapTier, v4v2agree, v4dnaAgree, allAgree,
+                    allThreeLock: derivedAllThreeLock,
+                    tripleAlign: derivedTripleAlign,
+                    isUpset: derivedUpset,
+                    isQuad: derivedQuad,
+                    myPick: myPick ? myPick.pickedTeam : null });
+            });
+
+            // Sort: by date then by time
+            games.sort(function(a,b){
+                if (a.dateKey!==b.dateKey) return a.dateKey<b.dateKey?-1:1;
+                if (!a.gt&&!b.gt) return 0;
+                if (!a.gt) return 1; if (!b.gt) return -1;
+                return a.gt-b.gt;
+            });
+
+            // My picks record
+            const allMyPicks = loadMyPicks();
+            const resolved = allMyPicks.filter(function(p){ return p.result; });
+            const myW = resolved.filter(function(p){ return p.result==='WIN'; }).length;
+            const myL = resolved.filter(function(p){ return p.result==='LOSS'; }).length;
+            const myPct = (myW+myL)>0 ? ((myW/(myW+myL))*100).toFixed(1)+'%' : '—';
+            const recCol = myW>myL?'#10b981':myW<myL?'#ef4444':'#8b92a7';
+
+            let html = '<div style="background:#0f1419;min-height:100vh;padding:0 0 40px 0;">';
+
+            // ── Header ──
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 12px 0;margin-bottom:12px;border-bottom:1px solid #1a2535;">';
+            html += '<div><div style="font-size:18px;font-weight:800;color:#fff;">🎯 My Picks — Matchup Board</div>';
+            html += '<div style="font-size:11px;color:#4a5568;margin-top:2px;">' + todayLabel + ' · ' + rawSources.length + ' games · ' + (activeSportFilter!=='ALL'?activeSportFilter+' filtered':'all sports') + '</div></div>';
+            html += '<div style="display:flex;align-items:center;gap:12px;">';
+            html += '<div style="text-align:center;background:#0a0e15;border:1px solid #1a2535;border-radius:6px;padding:6px 16px;">';
+            html += '<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">MY RECORD</div>';
+            html += '<div style="font-size:20px;font-weight:900;color:'+recCol+';">' + myW + '-' + myL + '</div>';
+            html += '<div style="font-size:10px;color:#4a5568;">' + myPct + '</div></div>';
+            html += '<button onclick="renderAccuracyDashboard()" style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">← Back</button>';
+            html += '</div></div>';
+
+            if (games.length === 0) {
+                html += '<div style="text-align:center;padding:60px;color:#4a5568;font-size:14px;">';
+                html += rawSources.length === 0
+                    ? 'Open a sport tab to load games, then return here. Open Pulse tab for all sports simultaneously.'
+                    : 'No ' + activeSportFilter + ' games loaded — try another sport filter above.';
+                html += '</div></div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            // ── Legend ──
+            html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:10px;color:#4a5568;">';
+            html += '<span style="color:#a78bfa;font-weight:700;">V4</span> V4 Chronos &nbsp;';
+            html += '<span style="color:#3b82f6;font-weight:700;">V2</span> Statistical &nbsp;';
+            html += '<span style="color:#10b981;font-weight:700;">🧬</span> DNA Pattern &nbsp;';
+            html += '<span style="color:#f59e0b;font-weight:700;">VGS</span> Vegas favorite &nbsp;';
+            html += '<span style="color:#4a5568;">· Tap team to record your pick · Unpicked games don\'t count toward your record</span>';
+            html += '</div>';
+
+            // ── Sport filter bar ──
+            html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">';
+            sportsPresent.forEach(function(sp) {
+                const isActive = activeSportFilter === sp;
+                const cnt = sp === 'ALL' ? rawSources.length : rawSources.filter(function(s){ return s.sp===sp; }).length;
+                html += '<button onclick="setMatchupSport(\''+sp+'\')" style="' +
+                    'background:' + (isActive?'#667eea':'#0a0e15') + ';' +
+                    'border:1px solid ' + (isActive?'#667eea':'#2a3142') + ';' +
+                    'color:' + (isActive?'#fff':'#8b92a7') + ';' +
+                    'padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">' +
+                    sp + ' <span style="font-size:9px;opacity:0.7;">(' + cnt + ')</span>' +
+                    '</button>';
+            });
+            html += '</div>';
+
+            // ── Games grouped by date ──
+            let lastDateKey = null;
+            let currentGroupOpen = false;
+
+            games.forEach(function(g) {
+                // Date divider — full-width, outside grid
+                if (g.dateKey !== lastDateKey) {
+                    if (currentGroupOpen) {
+                        html += '</div>'; // close previous grid
+                        currentGroupOpen = false;
+                    }
+                    lastDateKey = g.dateKey;
+                    const isT = g.isGameToday;
+                    const sepColor  = isT ? '#10b981' : '#60a5fa';
+                    const sepBg     = isT ? '#0a1f14' : '#111827';
+                    const sepBorder = isT ? '#10b981' : '#2a3a5c';
+                    html += '<div style="background:'+sepBg+';border:1px solid '+sepBorder+';border-radius:6px;'+
+                        'padding:6px 14px;margin:16px 0 10px 0;font-size:13px;font-weight:800;color:'+sepColor+';'+
+                        'text-transform:uppercase;letter-spacing:2px;display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;">'+
+                        (isT?'📅 ':'📆 ')+g.dateLabel+'</div>';
+                    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px;margin-bottom:4px;">';
+                    currentGroupOpen = true;
+                }
+
+                // ── Card ──
+                const borderCol = g.isQuad ? '#f59e0b' : g.allAgree ? '#10b981' : g.allThreeLock ? '#10b981' : g.v4v2agree ? '#667eea' : g.trapTier===1 ? '#ef4444' : '#1a2535';
+                const statusBadge = g.isFinal
+                    ? '<span style="color:#4a5568;font-size:9px;font-weight:700;">FINAL</span>'
+                    : g.isLive ? '<span style="color:#ef4444;font-size:9px;font-weight:800;">🔴 LIVE</span>'
+                    : '<span style="color:#8b92a7;font-size:9px;">' + g.timeStr + '</span>';
+
+                html += '<div style="background:#0d1018;border:1px solid '+borderCol+';border-radius:8px;padding:12px;">';
+
+                // Card header
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+                html += '<span style="font-size:10px;color:#667eea;font-weight:700;letter-spacing:1px;">' + g.sp + '</span>';
+                html += statusBadge;
+                html += '</div>';
+
+                // ── Team buttons ──
+                function teamBtn(name, isHome) {
+                    const isMyPick = g.myPick === name;
+                    const isV4     = g.v4pick  === name;
+                    const isV2     = g.v2pick  === name;
+                    const isDna    = g.dnaPick === name;
+                    const isVegas  = g.vegasFav=== name;
+                    const bg     = isMyPick ? '#10b98122' : '#0a0e15';
+                    const border = isMyPick ? '#10b981'   : (isV4?'#a78bfa33':'#1a2535');
+                    const safeName = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+                    const safeHt   = g.ht.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+                    const safeAt   = g.at.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+                    let b = '<button onclick="submitMyPick(\''+g.gid+'\',\''+safeName+'\',\''+safeHt+'\',\''+safeAt+'\',\''+g.sp+'\',\''+g.timeStr+'\')" ';
+                    b += 'style="background:'+bg+';border:1px solid '+border+';border-radius:6px;padding:8px 6px;cursor:pointer;text-align:center;width:100%;transition:border-color 0.15s;">';
+                    b += '<div style="font-size:12px;font-weight:800;color:'+(isMyPick?'#10b981':isV4?'#e8e8e8':'#aaa')+';">' + name.split(' ').pop() + '</div>';
+                    b += '<div style="font-size:9px;color:#4a5568;margin-top:1px;">' + name.split(' ').slice(0,-1).join(' ') + '</div>';
+                    // Signal tags with tooltips
+                    const tags = [];
+                    if (isV4)    tags.push('<span title="V4 Chronos pick: Vibrational Weather cipher engine across 9 calendars" style="color:#a78bfa;font-size:9px;font-weight:800;cursor:help;">V4</span>');
+                    if (isV2)    tags.push('<span title="V2 Statistical pick: efficiency ratings, pace, schedule strength" style="color:#3b82f6;font-size:9px;font-weight:800;cursor:help;">V2</span>');
+                    if (isDna)   tags.push('<span title="DNA Skip-Pattern pick: 6-day winner root sequence projection" style="font-size:9px;cursor:help;">🧬</span>');
+                    if (isVegas) tags.push('<span title="Vegas market favorite based on the spread direction" style="color:#f59e0b;font-size:9px;font-weight:700;cursor:help;">VGS</span>');
+                    if (tags.length) b += '<div style="display:flex;justify-content:center;gap:4px;margin-top:4px;">'+tags.join('')+'</div>';
+                    if (isMyPick) b += '<div style="font-size:9px;color:#10b981;font-weight:800;margin-top:2px;">✓ MY PICK</div>';
+                    b += '</button>';
+                    return b;
+                }
+
+                html += '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;margin-bottom:8px;">';
+                html += teamBtn(g.at, false);
+                html += '<div style="text-align:center;color:#4a5568;font-size:11px;font-weight:700;">@</div>';
+                html += teamBtn(g.ht, true);
+                html += '</div>';
+
+                // ── Vegas fav display row ──
+                if (g.vegasFav) {
+                    const vegasName = g.vegasFav.split(' ').pop();
+                    html += '<div style="font-size:10px;color:#f59e0b;text-align:center;margin-bottom:6px;" title="Vegas market favorite based on the spread line">🎰 Vegas: <strong>' + vegasName + '</strong></div>';
+                }
+
+                // ── Kalshi implied probability ──
+                const kalshiOdds = window.getKalshiOdds ? window.getKalshiOdds(g.ht, g.at) : null;
+                if (kalshiOdds) {
+                    const kCol = kalshiOdds.pct >= 65 ? '#10b981' : kalshiOdds.pct >= 50 ? '#3b82f6' : '#f59e0b';
+                    html += '<div style="font-size:10px;color:' + kCol + ';text-align:center;margin-bottom:6px;" title="Kalshi prediction market: ' + (kalshiOdds.title||'') + '">📈 Kalshi: <strong>' + kalshiOdds.team.split(' ').pop() + ' ' + kalshiOdds.pct + '%</strong></div>';
+                }
+
+                // ── Badge / signal strip with tooltips ──
+                const strip = [];
+                if (g.isQuad)
+                    strip.push('<span title="QUAD LOCK: V4, V2, DNA and Vegas all pick the same winner. Rarest and strongest signal in the system." style="color:#f59e0b;font-size:9px;font-weight:800;cursor:help;background:#f59e0b11;border:1px solid #f59e0b33;border-radius:3px;padding:1px 5px;">⚡ QUAD LOCK</span>');
+                else if (g.allAgree)
+                    strip.push('<span title="ALL 3 AGREE: V4, V2, and DNA pick the same winner. All three independent systems aligned." style="color:#10b981;font-size:9px;font-weight:800;cursor:help;background:#10b98111;border:1px solid #10b98133;border-radius:3px;padding:1px 5px;">✓ ALL 3 AGREE</span>');
+                else if (g.allThreeLock)
+                    strip.push('<span title="ALL-3 LOCK: V4 Chronos, V2 Statistical, and Vegas all pick the same winner." style="color:#10b981;font-size:9px;font-weight:700;cursor:help;background:#10b98111;border:1px solid #10b98133;border-radius:3px;padding:1px 5px;">🔒 ALL-3 LOCK</span>');
+                else if (g.tripleAlign)
+                    strip.push('<span title="TRIPLE LOCK: V4 + V2 + Vegas all agree, or V4 + Vegas aligned." style="color:#10b981;font-size:9px;cursor:help;background:#10b98111;border:1px solid #10b98133;border-radius:3px;padding:1px 5px;">🔐 TRIPLE</span>');
+                else if (g.v4v2agree)
+                    strip.push('<span title="V4 + V2 AGREE: Both the Gematria engine and Statistical model pick the same winner." style="color:#667eea;font-size:9px;cursor:help;">V4+V2 ✓</span>');
+                else if (g.v4v2agree===false)
+                    strip.push('<span title="V4 DISAGREES WITH V2: Gematria engine and Statistical model pick different winners. Lower confidence — evaluate carefully." style="color:#ef4444;font-size:9px;cursor:help;">⚠ V4≠V2</span>');
+                if (g.v4dnaAgree===false)
+                    strip.push('<span title="DNA DISAGREES WITH V4: Skip-pattern pick is different from V4 Chronos. Possible upset signal." style="color:#f59e0b;font-size:9px;cursor:help;">DNA≠V4</span>');
+                if (g.isUpset)
+                    strip.push('<span title="UPSET ALERT: V4 and V2 both pick the team that Vegas has as the underdog. High payout opportunity if engines are right." style="color:#f59e0b;font-size:9px;font-weight:800;cursor:help;background:#f59e0b11;border:1px solid #f59e0b33;border-radius:3px;padding:1px 5px;">⚡ UPSET ALERT</span>');
+                if (g.trapTier===1)
+                    strip.push('<span title="VOID LOCK (Tier 1): Both sport-optimized name variations AND 2+ top resonance calendars flag this as a 4/7 trap gate. Highest upset signal — reduce confidence in favorite." style="color:#ef4444;font-size:9px;font-weight:800;cursor:help;background:#ef444411;border:1px solid #ef444433;border-radius:3px;padding:1px 5px;">☠ VOID LOCK</span>');
+                else if (g.trapTier===2)
+                    strip.push('<span title="HIGH CONVICTION TRAP (Tier 2): Both name variations flag the gate AND 1 top calendar in trap mode. Watch for upset." style="color:#f59e0b;font-size:9px;cursor:help;background:#f59e0b11;border:1px solid #f59e0b33;border-radius:3px;padding:1px 5px;">⚡ TRAP T2</span>');
+                else if (g.trapTier===3)
+                    strip.push('<span title="LATENT TRAP (Tier 3): Trap structure present in primary variation, but not activated by today DPM environment. Low urgency." style="color:#4a5568;font-size:9px;cursor:help;">〰 LATENT</span>');
+                else if (g.trapFlag==='EXTREME')
+                    strip.push('<span title="EXTREME TRAP: Both Gate A and Gate B fire simultaneously. Lowest confidence — consider no-bet or fade with caution." style="color:#ef4444;font-size:9px;cursor:help;background:#ef444411;border:1px solid #ef444433;border-radius:3px;padding:1px 5px;">☠ EXTREME TRAP</span>');
+                if (g.v4pct)
+                    strip.push('<span title="V4 Chronos confidence percentage (blended tape margin + alignment bonuses)" style="color:#8b92a7;font-size:9px;cursor:help;">'+g.v4pct+'%</span>');
+
+                if (strip.length) {
+                    html += '<div style="display:flex;flex-wrap:wrap;gap:5px;padding-top:7px;border-top:1px solid #1a2535;">' + strip.join('') + '</div>';
+                }
+
+                html += '</div>'; // end card
+            });
+
+            if (currentGroupOpen) html += '</div>'; // close last grid
+            html += '</div>'; // wrapper
+            container.innerHTML = html;
+        };
+
+        function renderBadgeReport() {
+
+            // Collect all games from gameWPs
+            const games = [];
+            gameWPs.forEach(function(gd, gid) {
+                if (!gd.data) return;
+                const ht = gd.data.homeTeam, at = gd.data.awayTeam;
+                if (!ht || !at) return;
+                const isFinal = gd.data.isFinal === true;
+                const isLive  = gd.data.isLive === true;
+                const sp = (gd.sport || '').toUpperCase();
+                const gt = gd.data.startTime ? new Date(gd.data.startTime) : null;
+                const timeStr = gt ? gt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
+
+                // Get V4 pick from stored sidebar data
+                const v4pick = gd._tapeWinner || null;
+                const v4losing = gd._tapeLosing || null;
+                const v4pct = gd._blendedPct || null;
+                const trapFlag = gd._trapFlag || null;
+                const trapTier = gd._trapTier || null;
+
+                // Get V2 pick
+                let v2pick = null;
+                try {
+                    if (sp==='NBA'||sp==='CBB') {
+                        const br = getBasketballModelSpread(ht,at,sp.toLowerCase());
+                        if (br&&br.modelSpread!=null) v2pick = br.modelSpread<=0?ht:at;
+                    } else {
+                        const mr = getModelRatingsForGame(ht,at,sp.toLowerCase());
+                        if (mr&&mr.modelSpread!=null) v2pick = mr.modelSpread<=0?ht:at;
+                    }
+                } catch(e) {}
+
+                // DNA pattern pick
+                const dnaResult = computeSkipPatternPick ? computeSkipPatternPick(ht,at,sp.toLowerCase()) : null;
+                const dnaPick = dnaResult ? dnaResult.pick : null;
+                const dnaMethod = dnaResult ? dnaResult.method : null;
+
+                // Vegas fav
+                let vegasFav = null;
+                try {
+                    const odds = (gd.data.odds||[])[0] || gd.data.odds;
+                    if (odds&&odds.spread!=null) {
+                        const vs=parseFloat(odds.spread);
+                        if(!isNaN(vs)) vegasFav = vs<0?ht:at;
+                    }
+                } catch(e){}
+
+                // My pick for this game
+                const myPick = myPicks.find(function(p){ return p.gameId===gid; });
+
+                // Agreement flags
+                const v4v2agree = v4pick&&v2pick ? v4pick===v2pick : null;
+                const v4dnaAgree = v4pick&&dnaPick ? v4pick===dnaPick : null;
+                const allAgree = v4pick&&v2pick&&dnaPick && v4pick===v2pick && v2pick===dnaPick;
+
+                games.push({ gid, ht, at, sp, timeStr, isFinal, isLive, gt,
+                    v4pick, v4losing, v4pct, v2pick, dnaPick, dnaMethod,
+                    vegasFav, trapFlag, trapTier, v4v2agree, v4dnaAgree, allAgree,
+                    myPick: myPick ? myPick.pickedTeam : null });
+            });
+
+            // Sort by game time
+            games.sort(function(a,b){
+                if (!a.gt&&!b.gt) return 0;
+                if (!a.gt) return 1;
+                if (!b.gt) return -1;
+                return a.gt-b.gt;
+            });
+
+            // My picks W/L stats
+            const allMyPicks = loadMyPicks();
+            const resolvedPicks = allMyPicks.filter(function(p){ return p.result; });
+            const myW = resolvedPicks.filter(function(p){ return p.result==='WIN'; }).length;
+            const myL = resolvedPicks.filter(function(p){ return p.result==='LOSS'; }).length;
+            const myPct = (myW+myL)>0 ? ((myW/(myW+myL))*100).toFixed(1)+'%' : '—';
+
+            let html = '<div style="background:#0f1419;min-height:100vh;padding:0 0 40px 0;">';
+
+            // Header
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 12px 0;margin-bottom:16px;border-bottom:1px solid #1a2535;">';
+            html += '<div>';
+            html += '<div style="font-size:18px;font-weight:800;color:#fff;">🎯 My Picks — Matchup Board</div>';
+            html += '<div style="font-size:11px;color:#4a5568;margin-top:2px;">' + today + ' · ' + games.length + ' games loaded</div>';
+            html += '</div>';
+            html += '<div style="display:flex;align-items:center;gap:16px;">';
+            html += '<div style="text-align:center;background:#0a0e15;border:1px solid #1a2535;border-radius:6px;padding:6px 16px;">';
+            html += '<div style="font-size:10px;color:#4a5568;font-weight:700;">MY RECORD</div>';
+            html += '<div style="font-size:20px;font-weight:900;color:' + (myW>myL?'#10b981':myW<myL?'#ef4444':'#8b92a7') + ';">' + myW + '-' + myL + '</div>';
+            html += '<div style="font-size:10px;color:#4a5568;">' + myPct + '</div>';
+            html += '</div>';
+            html += '<button onclick="renderAccuracyDashboard()" style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">← Back</button>';
+            html += '</div></div>';
+
+            if (games.length === 0) {
+                html += '<div style="text-align:center;padding:60px;color:#4a5568;font-size:14px;">No games loaded — open a sport tab first, then return here.</div>';
+                html += '</div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            // Legend
+            html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:10px;">';
+            html += '<span style="color:#a78bfa;">🟣 V4</span>';
+            html += '<span style="color:#3b82f6;">🔵 V2</span>';
+            html += '<span style="color:#10b981;">🟢 DNA</span>';
+            html += '<span style="color:#f59e0b;">🟡 Vegas</span>';
+            html += '<span style="color:#4a5568;">· Click a team name to record your pick</span>';
+            html += '</div>';
+
+            // Game cards grid
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;">';
+
+            games.forEach(function(g) {
+                const borderCol = g.allAgree ? '#10b981' : g.v4v2agree ? '#667eea' : g.trapTier===1 ? '#ef4444' : '#1a2535';
+                const statusBadge = g.isFinal ? '<span style="color:#4a5568;font-size:9px;font-weight:700;">FINAL</span>'
+                    : g.isLive ? '<span style="color:#ef4444;font-size:9px;font-weight:800;">🔴 LIVE</span>'
+                    : '<span style="color:#8b92a7;font-size:9px;">' + g.timeStr + '</span>';
+
+                html += '<div style="background:#0d1018;border:1px solid ' + borderCol + ';border-radius:8px;padding:12px;">';
+
+                // Header row
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+                html += '<span style="font-size:10px;color:#667eea;font-weight:700;">' + g.sp + '</span>';
+                html += statusBadge;
+                html += '</div>';
+
+                // Two-team pick row
+                html += '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:10px;">';
+
+                // Away team
+                const awayMyPick = g.myPick === g.at;
+                const awayV4 = g.v4pick===g.at, awayV2=g.v2pick===g.at, awayDna=g.dnaPick===g.at, awayVegas=g.vegasFav===g.at;
+                const awayBg = awayMyPick ? '#10b98122' : '#0a0e15';
+                const awayBorder = awayMyPick ? '#10b981' : '#1a2535';
+                html += '<button onclick="submitMyPick(\''+g.gid+'\',\''+g.at.replace(/'/g,"\\'")+'\',' +
+                    '\''+g.ht.replace(/'/g,"\\'")+'\',\''+g.at.replace(/'/g,"\\'")+'\',\''+g.sp+'\',\''+g.timeStr+'\')" ' +
+                    'style="background:'+awayBg+';border:1px solid '+awayBorder+';border-radius:6px;padding:8px;cursor:pointer;text-align:center;width:100%;">';
+                html += '<div style="font-size:12px;font-weight:800;color:' + (awayMyPick?'#10b981':'#fff') + ';">' + g.at.split(' ').pop() + '</div>';
+                html += '<div style="font-size:9px;color:#4a5568;margin-top:2px;">' + g.at.split(' ').slice(0,-1).join(' ') + '</div>';
+                // Signal dots
+                html += '<div style="display:flex;justify-content:center;gap:3px;margin-top:4px;">';
+                if (awayV4)    html += '<span title="V4 pick" style="color:#a78bfa;font-size:10px;">V4</span>';
+                if (awayV2)    html += '<span title="V2 pick" style="color:#3b82f6;font-size:10px;">V2</span>';
+                if (awayDna)   html += '<span title="DNA pick" style="color:#10b981;font-size:10px;">🧬</span>';
+                if (awayVegas) html += '<span title="Vegas fav" style="color:#f59e0b;font-size:10px;">VGS</span>';
+                html += '</div>';
+                if (awayMyPick) html += '<div style="font-size:9px;color:#10b981;font-weight:800;margin-top:2px;">✓ MY PICK</div>';
+                html += '</button>';
+
+                // @ divider
+                html += '<div style="text-align:center;color:#4a5568;font-size:12px;font-weight:700;">@</div>';
+
+                // Home team
+                const homeMyPick = g.myPick === g.ht;
+                const homeV4=g.v4pick===g.ht, homeV2=g.v2pick===g.ht, homeDna=g.dnaPick===g.ht, homeVegas=g.vegasFav===g.ht;
+                const homeBg = homeMyPick ? '#10b98122' : '#0a0e15';
+                const homeBorder = homeMyPick ? '#10b981' : '#1a2535';
+                html += '<button onclick="submitMyPick(\''+g.gid+'\',\''+g.ht.replace(/'/g,"\\'")+'\',' +
+                    '\''+g.ht.replace(/'/g,"\\'")+'\',\''+g.at.replace(/'/g,"\\'")+'\',\''+g.sp+'\',\''+g.timeStr+'\')" ' +
+                    'style="background:'+homeBg+';border:1px solid '+homeBorder+';border-radius:6px;padding:8px;cursor:pointer;text-align:center;width:100%;">';
+                html += '<div style="font-size:12px;font-weight:800;color:' + (homeMyPick?'#10b981':'#fff') + ';">' + g.ht.split(' ').pop() + '</div>';
+                html += '<div style="font-size:9px;color:#4a5568;margin-top:2px;">' + g.ht.split(' ').slice(0,-1).join(' ') + '</div>';
+                html += '<div style="display:flex;justify-content:center;gap:3px;margin-top:4px;">';
+                if (homeV4)    html += '<span title="V4 pick" style="color:#a78bfa;font-size:10px;">V4</span>';
+                if (homeV2)    html += '<span title="V2 pick" style="color:#3b82f6;font-size:10px;">V2</span>';
+                if (homeDna)   html += '<span title="DNA pick" style="color:#10b981;font-size:10px;">🧬</span>';
+                if (homeVegas) html += '<span title="Vegas fav" style="color:#f59e0b;font-size:10px;">VGS</span>';
+                html += '</div>';
+                if (homeMyPick) html += '<div style="font-size:9px;color:#10b981;font-weight:800;margin-top:2px;">✓ MY PICK</div>';
+                html += '</button>';
+
+                html += '</div>'; // end team grid
+
+                // Agreement / warning strip
+                const stripParts = [];
+                if (g.allAgree)         stripParts.push('<span style="color:#10b981;font-size:9px;font-weight:800;">✓ ALL 3 AGREE</span>');
+                else if (g.v4v2agree)   stripParts.push('<span style="color:#667eea;font-size:9px;">V4+V2 agree</span>');
+                else if (g.v4v2agree===false) stripParts.push('<span style="color:#ef4444;font-size:9px;">⚠ V4≠V2</span>');
+                if (g.v4dnaAgree===false) stripParts.push('<span style="color:#f59e0b;font-size:9px;">DNA≠V4</span>');
+                if (g.trapTier===1)     stripParts.push('<span style="color:#ef4444;font-size:9px;font-weight:800;">☠ VOID LOCK</span>');
+                else if (g.trapTier===2) stripParts.push('<span style="color:#f59e0b;font-size:9px;">⚡ TRAP T2</span>');
+                if (g.v4pct) stripParts.push('<span style="color:#8b92a7;font-size:9px;">V4: ' + g.v4pct + '%</span>');
+
+                if (stripParts.length > 0) {
+                    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;border-top:1px solid #1a2535;">' + stripParts.join('') + '</div>';
+                }
+
+                html += '</div>'; // end card
+            });
+
+            html += '</div></div>'; // end grid + wrapper
+            container.innerHTML = html;
+        };
+
         function renderBadgeReport() {
             const content = document.getElementById('content');
             if (!content) return;
@@ -12586,20 +13699,46 @@ function _showBracketTable() {
                   desc:'Gate B trap fires (4/7).',
                   test: function(g){ return g.trapFlag === 'VOID_TRAP'; }},
                 // ── New tiered trap badges ──
+                // ── Cover and O/U result badges ──
+                { key:'v4_covered',      label:'💰 V4 COVERED',        color:'#10b981', tier:'flag',
+                  desc:'V4 predicted winner covered the Vegas spread.',
+                  test: function(g){ return g.v4PickCoveredSpread === true; }},
+                { key:'v4_no_cover',     label:'❌ V4 NO COVER',        color:'#ef4444', tier:'flag',
+                  desc:'V4 predicted winner failed to cover the Vegas spread.',
+                  test: function(g){ return g.v4PickCoveredSpread === false; }},
+                { key:'v2_covered',      label:'💰 V2 COVERED',        color:'#3b82f6', tier:'flag',
+                  desc:'V2 predicted winner covered the Vegas spread.',
+                  test: function(g){ return g.v2PickCoveredSpread === true; }},
+                { key:'v4_total_hit',    label:'🎯 V4 TOTAL CORRECT',  color:'#10b981', tier:'flag',
+                  desc:'V4 total prediction correctly called the Over or Under.',
+                  test: function(g){ return g.v4TotalCorrect === true; }},
+                { key:'v4_total_miss',   label:'🎯 V4 TOTAL WRONG',    color:'#ef4444', tier:'flag',
+                  desc:'V4 total prediction incorrectly called the Over/Under direction.',
+                  test: function(g){ return g.v4TotalCorrect === false; }},
+                { key:'v2_total_hit',    label:'📊 V2 TOTAL CORRECT',  color:'#3b82f6', tier:'flag',
+                  desc:'V2 total prediction correctly called the Over or Under.',
+                  test: function(g){ return g.v2TotalCorrect === true; }},
+                { key:'actual_over',     label:'⬆️ WENT OVER',          color:'#f59e0b', tier:'flag',
+                  desc:'Game total went Over the Vegas line.',
+                  test: function(g){ return g.actualOver === true; }},
+                { key:'actual_under',    label:'⬇️ WENT UNDER',         color:'#8b5cf6', tier:'flag',
+                  desc:'Game total went Under the Vegas line.',
+                  test: function(g){ return g.actualUnder === true; }},
+
                 // Skip-pattern badges
-                { key:'skip_primary',   label:'🧬 SKIP: PRIMARY',    color:'#10b981', tier:'flag',
+                { key:'skip_primary',   label:'🧬 DNA: PRIMARY',    color:'#10b981', tier:'flag',
                   desc:'Skip-pattern pick via primary predicted root match.',
                   test: function(g){ return g.skipPatternMethod === 'primary'; }},
-                { key:'skip_secondary', label:'🧬 SKIP: SECONDARY',   color:'#f59e0b', tier:'flag',
+                { key:'skip_secondary', label:'🧬 DNA: SECONDARY',   color:'#f59e0b', tier:'flag',
                   desc:'Skip-pattern pick via secondary predicted root.',
                   test: function(g){ return g.skipPatternMethod === 'secondary' || g.skipPatternMethod === 'fallback'; }},
-                { key:'skip_proximity', label:'🧬 SKIP: PROXIMITY',   color:'#a78bfa', tier:'flag',
+                { key:'skip_proximity', label:'🧬 DNA: PROXIMITY',   color:'#a78bfa', tier:'flag',
                   desc:'Skip-pattern pick via closest root distance — no direct match found.',
                   test: function(g){ return g.skipPatternMethod === 'proximity'; }},
-                { key:'skip_v4_agree',  label:'🧬 SKIP+V4 AGREE',     color:'#10b981', tier:'flag',
+                { key:'skip_v4_agree',  label:'🧬 DNA+V4 AGREE',     color:'#10b981', tier:'flag',
                   desc:'Skip-pattern and V4 both pick same team.',
                   test: function(g){ return g.skipPatternPick && g.v4Winner && g.skipPatternPick === g.v4Winner; }},
-                { key:'skip_v4_split',  label:'🧬 SKIP≠V4',           color:'#ef4444', tier:'flag',
+                { key:'skip_v4_split',  label:'🧬 DNA≠V4',           color:'#ef4444', tier:'flag',
                   desc:'Skip-pattern and V4 pick different teams. High interest divergence.',
                   test: function(g){ return g.skipPatternPick && g.v4Winner && g.skipPatternPick !== g.v4Winner; }},
                 { key:'trap_tier1',    label:'☠️ VOID LOCK (Tier 1)',  color:'#ef4444', tier:'flag',
@@ -12988,8 +14127,10 @@ function _showBracketTable() {
                     <div class="overall-stats">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                             <h2 style="margin:0;">Overall Performance</h2>
-                            <button onclick="runV4ModeAudit()" style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">⚡ V4 Mode A vs B Audit</button>
-                            <button onclick="renderBadgeReport()" style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">🏅 Badge Accuracy Report</button>
+                            <div style="display:flex;gap:8px;">
+                                <button onclick="renderMatchupBoard()" style="background:#10b98122;border:1px solid #10b98155;color:#10b981;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">🎯 My Picks — Matchup Board</button>
+                                <button onclick="renderBadgeReport()" style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">🏅 Badge Accuracy Report</button>
+                            </div>
                         </div>
                         <div class="stats-grid">
                             <div class="stat-card">
@@ -13048,10 +14189,25 @@ function _showBracketTable() {
                                     '<div class="stat-sublabel" style="font-size:0.9em;color:#888;margin-top:4px;">' + todayWinRate + (todayTotal > 0 ? ' &middot; ' + todayTotal + ' games' : ' &middot; no results yet') + '</div>' +
                                 '</div>';
                             })()}
+                            ${(() => {
+                                // My Picks W/L card
+                                const mp = loadMyPicks ? loadMyPicks() : [];
+                                const res = mp.filter(function(p){ return p.result; });
+                                const mpW = res.filter(function(p){ return p.result==='WIN'; }).length;
+                                const mpL = res.filter(function(p){ return p.result==='LOSS'; }).length;
+                                const mpPct = (mpW+mpL)>0 ? ((mpW/(mpW+mpL))*100).toFixed(1)+'%' : '—';
+                                const mpPos = (mpW+mpL)>0 && (mpW/(mpW+mpL))>0.55;
+                                return '<div class="stat-card" style="border:1px solid ' + (mpPos?'#10b98144':'#2a3142') + ';background:' + (mpPos?'#0d201088':'#1a1f2e') + ';cursor:pointer;" onclick="renderMatchupBoard()" title="Click to open Matchup Board">' +
+                                    '<div class="stat-label" style="color:#10b981;">🎯 My Picks</div>' +
+                                    '<div class="stat-value' + (mpPos?' positive':'') + '" style="font-size:1.8em;font-weight:700;">' + mpW + '-' + mpL + '</div>' +
+                                    '<div class="stat-sublabel" style="font-size:0.9em;color:#888;margin-top:4px;">' + mpPct + (mp.length>0?' &middot; '+mp.length+' picked':' &middot; tap to pick') + '</div>' +
+                                '</div>';
+                            })()}
+                        </div>
+                        <div style="text-align:center;margin-top:10px;">
+                            <button onclick="runV4ModeAudit()" style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;padding:5px 16px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">⚡ V4 Mode A vs B Audit</button>
                         </div>
                     </div>
-                    
-                    <div class="model-comparison-section">
                         <h2>📅 Calendar Accuracy Tracking - V4 Chronos</h2>
                         <p style="color: #8b92a7; margin-bottom: 20px;">Track which calendar system is the "Lead Server" by monitoring prediction accuracy across all 9 calendars</p>
                         <div class="comparison-grid">
@@ -13766,6 +14922,18 @@ function _showBracketTable() {
                                     (calStr ? '<span style="font-size:9px;background:#1a1f2e;border:1px solid #2a3142;border-radius:3px;padding:1px 6px;color:#3b82f6;">Cals: ' + calStr + '</span>' : '') +
                                     (tapeV4Label ? '<span style="font-size:9px;color:#667eea;">' + tapeV4Label.replace(/[🔑🏛️🎯⚡📊🔮〰️🔢]/gu,'').trim() + '</span>' : '') +
                                 '</div>' +
+                                // New signal badges row
+                                '<div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap;align-items:center;">' +
+                                    (game.allThreeLock ? '<span style="font-size:9px;font-weight:800;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 6px;color:#10b981;">🔒 ALL-3 LOCK</span>' : '') +
+                                    (!game.allThreeLock && game.tripleAlign ? '<span style="font-size:9px;font-weight:800;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 6px;color:#10b981;">🔐 TRIPLE</span>' : '') +
+                                    (!game.allThreeLock && !game.tripleAlign && game.modesAgree ? '<span style="font-size:9px;background:#a78bfa22;border:1px solid #a78bfa44;border-radius:3px;padding:1px 6px;color:#a78bfa;">🤝 A+B</span>' : '') +
+                                    (game.skipPatternPick ? '<span style="font-size:9px;background:#10b98122;border:1px solid #10b98133;border-radius:3px;padding:1px 6px;color:#10b981;">🧬 DNA: ' + game.skipPatternPick.split(' ').pop() + '</span>' : '') +
+                                    (game.isLopsided ? '<span style="font-size:9px;background:#ff6b3522;border:1px solid #ff6b3544;border-radius:3px;padding:1px 6px;color:#ff6b35;">🔥 LOPSIDED</span>' : '') +
+                                    (game.trapTier === 1 ? '<span style="font-size:9px;font-weight:800;background:#ef444422;border:1px solid #ef444455;border-radius:3px;padding:1px 6px;color:#ef4444;">☠️ VOID LOCK</span>' : '') +
+                                    (game.trapTier === 2 ? '<span style="font-size:9px;background:#f59e0b22;border:1px solid #f59e0b55;border-radius:3px;padding:1px 6px;color:#f59e0b;">⚡ TRAP T2</span>' : '') +
+                                    (game.tapeConfFinal ? '<span style="font-size:9px;color:#8b92a7;">📊 ' + game.tapeConfFinal + '%</span>' : '') +
+                                    (game.mergedRuleTag ? '<span style="font-size:9px;color:#667eea;background:#0a0e1a;border:1px solid #667eea33;border-radius:3px;padding:1px 5px;">' + game.mergedRuleTag + '</span>' : '') +
+                                '</div>' +
                                 '<span class="fetch-status" style="margin-top:3px;">' + (game.espnGameId ? '🔄 ESPN auto-resolve' : '⚠️ Manual resolve required') + ' · Attempts: ' + game.fetchAttempts + '/10</span>' +
                             '</div>' +
                             '<div class="pending-game-actions">' +
@@ -13815,6 +14983,14 @@ function _showBracketTable() {
                             (v4v2Agree && !tripleAlign ? '<span style="font-size:10px;color:#3b82f6;background:#3b82f615;border:1px solid #3b82f633;border-radius:3px;padding:1px 5px;">✓ V4+V2 Agree</span>' : '') +
                             // V4 conviction label
                             (game.v4ConvictionLabel ? '<span style="font-size:10px;color:#667eea;">' + game.v4ConvictionLabel.replace(/[🔑🏛️🎯⚡📊🔮🔢]/gu,'').trim() + (game.v4ConvictionPct ? ' (' + game.v4ConvictionPct + '%)' : '') + '</span>' : '') +
+                            // DNA skip pick
+                            (game.skipPatternPick ? '<span style="font-size:9px;background:#10b98122;border:1px solid #10b98133;border-radius:3px;padding:1px 6px;color:#10b981;">🧬 DNA: ' + game.skipPatternPick.split(' ').pop() + (game.skipPatternPick === v4Winner ? ' ✓' : ' ≠V4') + '</span>' : '') +
+                            // Trap tier
+                            (game.trapTier === 1 ? '<span style="font-size:9px;font-weight:800;background:#ef444422;border:1px solid #ef444455;border-radius:3px;padding:1px 6px;color:#ef4444;">☠️ VOID LOCK</span>' : '') +
+                            (game.trapTier === 2 ? '<span style="font-size:9px;background:#f59e0b22;border:1px solid #f59e0b55;border-radius:3px;padding:1px 6px;color:#f59e0b;">⚡ TRAP T2</span>' : '') +
+                            (game.trapTier === 3 ? '<span style="font-size:9px;background:#1a2030;border:1px solid #2a3142;border-radius:3px;padding:1px 6px;color:#4a5568;">〰️ LATENT</span>' : '') +
+                            // Merge rule tag (when modes disagreed)
+                            (game.mergedRuleTag ? '<span style="font-size:9px;color:#667eea;background:#0a0e1a;border:1px solid #667eea33;border-radius:3px;padding:1px 5px;">' + game.mergedRuleTag + '</span>' : '') +
                         '</div>' +
                         '<span class="fetch-status" style="margin-top:3px;">Auto-fetch: ' + game.fetchAttempts + '/10</span>' +
                         '</div>' +
@@ -16025,6 +17201,8 @@ function _showBracketTable() {
                 }
 
                 lastFetchTime = new Date();
+            // Auto-resolve parlay legs after every fetch cycle
+            try { accuracyTracker.checkParlayResults(); } catch(e) {}
                 
                 const liveCount = games.filter(g => g.competitions[0].status.type.state === 'in').length;
                 const pregameCount = games.length - liveCount;
@@ -16316,6 +17494,36 @@ function _showBracketTable() {
                     // Compute skip-pattern pick for this game
                     const _skipResult = computeSkipPatternPick(homeTeam, awayTeam, gameSport||currentSport);
 
+                    // ── Individual team score prediction ──
+                    // Formula: start from V2 predicted total + spread, then apply V4 VW ratio
+                    // v2Spread: negative = home favored (home covers), positive = away favored
+                    let _winnerScore = null, _loserScore = null;
+                    try {
+                        const _rawSpread = gameData.result ? gameData.result.predictedSpread : null;
+                        const _rawTotal  = gameData.result ? gameData.result.predictedTotal  : null;
+                        if (_rawSpread != null && _rawTotal != null && !isNaN(_rawSpread) && !isNaN(_rawTotal)) {
+                            // Back-calculate from spread + total
+                            // spread < 0 → home favored by |spread|, so home = (total - spread) / 2
+                            const _homeBase = (_rawTotal - _rawSpread) / 2;
+                            const _awayBase = _rawTotal - _homeBase;
+                            const _winnerBase = tapeWinner === homeTeam ? _homeBase : _awayBase;
+                            const _loserBase  = tapeWinner === homeTeam ? _awayBase : _homeBase;
+                            // Apply V4 VW ratio as resonance multiplier (capped at ±8%)
+                            const _vwRatio = (winnerTS.total > 0 && loserTS.total > 0)
+                                ? Math.min(1.08, Math.max(0.92, winnerTS.total / (winnerTS.total + loserTS.total) * 2))
+                                : 1.0;
+                            // Distribute the total proportionally using vwRatio
+                            const _adjTotal = _rawTotal;
+                            _winnerScore = Math.round((_adjTotal * _vwRatio / (1 + _vwRatio)) * 10) / 10;
+                            _loserScore  = Math.round((_adjTotal / (1 + _vwRatio)) * 10) / 10;
+                            // Ensure winner always has higher score
+                            if (_loserScore >= _winnerScore) {
+                                _winnerScore = Math.round((_rawTotal / 2 + Math.abs(_rawSpread) / 2) * 10) / 10;
+                                _loserScore  = Math.round((_rawTotal - _winnerScore) * 10) / 10;
+                            }
+                        }
+                    } catch(e) {}
+
                     predictions.push({
                         homeTeam, awayTeam, gameTime,
                         isLive: gameData.data && gameData.data.isLive === true,
@@ -16334,6 +17542,8 @@ function _showBracketTable() {
                         trapFlag, gateA, gateB, trapA, trapB,
                         trapTier: _sidebarTrapResult.tier || null,
                         trapTierType: _sidebarTrapResult.gateType || null,
+                        winnerScore: _winnerScore,
+                        loserScore:  _loserScore,
                         skipPatternPick: _skipResult ? _skipResult.pick : null,
                         skipPatternMethod: _skipResult ? _skipResult.method : null,
                         skipPatternRoot: _skipResult ? _skipResult.matchedRoot : null,
@@ -16490,7 +17700,15 @@ function _showBracketTable() {
                 }
                 // Add merge rule tag when modes disagreed — shows which rule fired
                 if (p.mergedRuleTag) {
-                    alignBadges += ' <span style="font-size:9px;color:#667eea;background:#0a0e1a;border:1px solid #667eea33;border-radius:3px;padding:1px 5px;" title="Merged engine rule: ' + p.mergedRule + '">' + p.mergedRuleTag + '</span>';
+                    const ENGINE_RULE_TIPS = {
+                        'R_INCONSISTENT': 'MODE A INCONSISTENT → USING MODE B\n\nMode A (Conviction Engine) produced different winners depending on which team was listed first vs second in the cipher calculation. This means the gematria signal is ambiguous — no stable cipher-to-VW match exists for either team from both orderings.\n\nResolution: Mode B (VW Tape Scorer) takes over as the primary pick since it is order-independent by design.',
+                        'R1:A':  'MERGE RULE 1: LARGE MARGIN → MODE A\n\nMode A and Mode B disagree on the winner. However, the VW tape margin between the two teams is 100+ points — a dominant separation. When Mode B shows this much separation, Mode A (the conviction engine) historically outperforms Mode B on these high-margin games (86% vs Mode B rate).\n\nResolution: Mode A pick used.',
+                        'R2:B':  'MERGE RULE 2: SMALL MARGIN → MODE B\n\nMode A and Mode B disagree. The VW tape margin is <30 points — too close for Mode A cipher matching to be decisive. On low-margin games, Mode B broader VW accumulation (63%) outperforms Mode A.\n\nResolution: Mode B pick used.',
+                        'R4:B':  'MERGE RULE 4: EXTREME CONVICTION → MODE B\n\nMode A fired at 96%+ conviction (Golden Key / Structural Lock territory). Counter-intuitively, these extreme Mode A signals correlate with Mode B being MORE accurate (33% vs 29%) — possibly because extreme cipher matches indicate the day VW is saturated and Mode B captures the broader resonance better.\n\nResolution: Mode B pick used.',
+                        'R3:A':  'MERGE RULE 3: MEDIUM MARGIN DEFAULT → MODE A\n\nMode A and Mode B disagree. Margin is in the 30–99 range and conviction is below 96%. In this middle zone, Mode A (50%) slightly outperforms Mode B (46%) historically.\n\nResolution: Mode A pick used as default.'
+                    };
+                    const ruleFullTip = (ENGINE_RULE_TIPS[p.mergedRule] || ('Merged engine rule: ' + p.mergedRule)).replace(/"/g,'&quot;').replace(/\n/g,'&#10;');
+                    alignBadges += ' <span class="chronos-tip" data-tip="' + ruleFullTip + '" style="font-size:9px;color:#667eea;background:#0a0e1a;border:1px solid #667eea33;border-radius:3px;padding:1px 5px;cursor:help;">' + p.mergedRuleTag + '</span>';
                 }
 
                 // ── V4 Override Badge (NBA/CBB only) ──
@@ -16601,8 +17819,14 @@ function _showBracketTable() {
                     // Winner + confidence
                     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px;">' +
                         '<div style="flex:1;min-width:0;">' +
-                            '<div style="font-size:14px;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + p.tapeWinner + '</div>' +
-                            '<div style="font-size:11px;color:#6b7280;margin-top:1px;">vs ' + p.tapeLosing + '</div>' +
+                            '<div style="display:flex;align-items:baseline;gap:6px;white-space:nowrap;overflow:hidden;">' +
+                                '<span style="font-size:14px;font-weight:800;color:#fff;overflow:hidden;text-overflow:ellipsis;">' + p.tapeWinner + '</span>' +
+                                (p.winnerScore != null ? '<span style="font-size:13px;font-weight:900;color:'+marginColor+';">' + p.winnerScore.toFixed(0) + '</span>' : '') +
+                            '</div>' +
+                            '<div style="display:flex;align-items:baseline;gap:5px;margin-top:1px;">' +
+                                '<span style="font-size:11px;color:#6b7280;">vs ' + p.tapeLosing + '</span>' +
+                                (p.loserScore != null ? '<span style="font-size:10px;color:#4a5568;font-weight:700;">' + p.loserScore.toFixed(0) + '</span>' : '') +
+                            '</div>' +
                         '</div>' +
                         '<div style="text-align:right;flex-shrink:0;margin-left:8px;">' +
                             '<div class="chronos-tip" data-tip="Blended confidence combining V4 tape VW margin, V2 model alignment, and Vegas alignment. Triple Lock +12%, V2+V4 Agree +6%, V2+V4 Split -8%." style="font-size:15px;font-weight:800;color:'+marginColor+';cursor:help;">' + p.tapeConfPct + '%</div>' +
@@ -16646,12 +17870,12 @@ function _showBracketTable() {
                         const rootLine = p.skipPickRoots
                             ? (p.skipPatternPick||'').split(' ').pop()+': city='+p.skipPickRoots.city+' msc='+p.skipPickRoots.mascot+' | '+(p.skipPatternPick===p.homeTeam?p.awayTeam:p.homeTeam).split(' ').pop()+': city='+p.skipOppRoots.city+' msc='+p.skipOppRoots.mascot
                             : (p.skipPatternDetail||'');
-                        const tipText = ('SKIP-PATTERN PICK — ' + pickName + '\n\nMethod: ' + methodLabel +
+                        const tipText = ('DNA PATTERN PICK — ' + pickName + '\n\nMethod: ' + methodLabel +
                             '\nToday\'s predicted roots: ' + (p.skipPatternRoots||[]).join(', ') +
                             '\n\n' + rootLine +
                             '\n\nSigns: ' + agreeTag +
                             '\n\nBased on 6-day winner root DNA skip-pattern analysis. Rank #2 sequence (std=1.8) predicts momentum→Root 7, alternating→Root 3, Rank#1→Root 1. No universal anchor.').replace(/"/g,'&quot;');
-                        return '<div style="margin-top:4px;"><span class="chronos-tip" data-tip="' + tipText + '" style="font-size:10px;font-weight:800;color:'+col+';background:'+col+'11;border:1px solid '+col+'44;border-radius:4px;padding:2px 8px;cursor:help;">' + icon + ' SKIP: ' + pickName + ' (' + methodLabel + ')' + agreeTag + '</span></div>';
+                        return '<div style="margin-top:4px;"><span class="chronos-tip" data-tip="' + tipText + '" style="font-size:10px;font-weight:800;color:'+col+';background:'+col+'11;border:1px solid '+col+'44;border-radius:4px;padding:2px 8px;cursor:help;">' + icon + ' DNA: ' + pickName + ' (' + methodLabel + ')' + agreeTag + '</span></div>';
                     })() +
                     ouLineHtml +
                     '</div>';
@@ -18831,10 +20055,11 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                     const statusName  = (comp.status && comp.status.type && comp.status.type.name)  ? comp.status.type.name  : '';
                     // Derive league from endpoint path (last segment, e.g. 'eng.1')
                     const leagueSlug = ep.path.split('/').pop() || '';
+                    const evStartTime = (comp.date || ev.date) ? (comp.date || ev.date) : null;
                     window.pulseState.poolGames[ev.id] = {
                         gameId: ev.id, sport, homeTeam, awayTeam,
                         homeScore, awayScore, status: statusState, statusName,
-                        league: leagueSlug
+                        league: leagueSlug, startTime: evStartTime
                     };
                 });
             } catch(e) {
