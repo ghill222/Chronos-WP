@@ -9463,27 +9463,110 @@ function _showBracketTable() {
         };
 
         // ── Kalshi public market fetch — no auth required ──
-        window.fetchKalshiMarkets = async function(category) {
-            // Market data is public — no auth needed.
-            // allorigins.win proxy bypasses CORS for null-origin (file://) and GitHub Pages.
-            const targetUrl = KALSHI_PUBLIC_BASE + '/events?with_nested_markets=true&status=open&limit=200';
-            const proxyUrl  = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl);
+        window.fetchKalshiMarkets = async function(sport) {
+            // Helper: fetch with timeout + proxy fallback
+            async function kalshiFetch(path) {
+                const direct = KALSHI_PUBLIC_BASE + path;
+                const proxy  = 'https://corsproxy.io/?' + encodeURIComponent(direct);
+                const proxy2 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(direct);
 
-            // Try direct first (works when served from a real domain with CORS allowed),
-            // fall back to proxy if blocked
-            const attempts = [targetUrl, proxyUrl];
-            for (const url of attempts) {
-                try {
-                    const resp = await fetch(url);
-                    if (!resp.ok) continue;
-                    const data = await resp.json();
-                    const events = data.events || data.contents && JSON.parse(data.contents).events || [];
-                    if (events.length >= 0) return events; // success (even empty is valid)
-                } catch(e) {
-                    console.warn('Kalshi fetch attempt failed (' + url.substring(0,40) + '...):', e.message);
+                async function tryUrl(url, ms) {
+                    const ctrl = new AbortController();
+                    const t = setTimeout(function(){ ctrl.abort(); }, ms);
+                    try {
+                        const r = await fetch(url, { signal: ctrl.signal });
+                        clearTimeout(t);
+                        if (!r.ok) return null;
+                        const text = await r.text();
+                        const json = JSON.parse(text);
+                        // allorigins wraps in {contents:'...'}
+                        return json.events || (json.contents ? JSON.parse(json.contents).events : null) || json;
+                    } catch(e) { clearTimeout(t); return null; }
+                }
+
+                return await tryUrl(direct, 5000)
+                    || await tryUrl(proxy,  9000)
+                    || await tryUrl(proxy2, 9000)
+                    || null;
+            }
+
+            // ── Kalshi series ticker patterns by sport ──
+            // These target specific sports categories at the API level so we don't
+            // wade through 200 AI/politics markets
+            const SPORT_SERIES = {
+                tennis: [
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPMIAMI',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISWTAMIAMI',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPMONTECARLO',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPMADRID',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPROME',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPWIMBLEDON',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPUSOPEN',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPAUSTRALIANOPEN',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATP',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISWTA'
+                ],
+                mma: [
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXUFC',
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXMMA'
+                ],
+                nba: [
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXNBA'
+                ],
+                nhl: [
+                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXNHL'
+                ]
+            };
+
+            // Keywords to identify relevant events when series_ticker filter misses
+            const SPORT_KEYWORDS = {
+                tennis: ['tennis','atp','wta','miami open','madrid open','roland garros','wimbledon','us open','australian open','monte carlo','indian wells'],
+                mma:    ['ufc','mma','fight','bout','vs.','fighter'],
+                nba:    ['nba','basketball','lakers','celtics','warriors','knicks','nets','heat','bulls','nuggets','suns','bucks','sixers','clippers'],
+                nhl:    ['nhl','hockey','stanley cup','bruins','rangers','leafs','canadiens','penguins','capitals','avalanche','lightning','oilers']
+            };
+
+            const series = SPORT_SERIES[sport] || [];
+            const keywords = SPORT_KEYWORDS[sport] || [];
+            const collected = [];
+            const seenIds = new Set();
+
+            // Try targeted series fetches first
+            for (const path of series) {
+                const events = await kalshiFetch(path);
+                if (events && Array.isArray(events)) {
+                    events.forEach(function(ev) {
+                        if (!seenIds.has(ev.event_ticker)) {
+                            seenIds.add(ev.event_ticker);
+                            collected.push(ev);
+                        }
+                    });
+                    if (collected.length > 0) break; // got matches — no need to try all series
                 }
             }
-            return null; // both failed
+
+            // If series fetches found nothing, fall back to full fetch + keyword filter
+            if (collected.length === 0) {
+                const allEvents = await kalshiFetch('/events?with_nested_markets=true&status=open&limit=200');
+                if (allEvents && Array.isArray(allEvents)) {
+                    allEvents.forEach(function(ev) {
+                        const haystack = [
+                            ev.title||'', ev.sub_title||'', ev.series_ticker||'',
+                            ev.event_ticker||'', ev.category||''
+                        ].join(' ').toLowerCase();
+                        const isMatch = keywords.some(function(k){ return haystack.includes(k); });
+                        // Also accept if category is Sports
+                        const isSports = (ev.category||'').toLowerCase().includes('sport');
+                        if ((isMatch || isSports) && !seenIds.has(ev.event_ticker)) {
+                            seenIds.add(ev.event_ticker);
+                            collected.push(ev);
+                        }
+                    });
+                }
+            }
+
+            console.log('Kalshi ' + sport + ': ' + collected.length + ' events found');
+            return collected.length > 0 ? collected : null;
         };
 
         // ── Parse Kalshi market into usable format ──
@@ -9514,29 +9597,18 @@ function _showBracketTable() {
 
             if (events === null) {
                 el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">' +
-                    '⚠️ Could not reach Kalshi — possible CORS restriction from GitHub Pages. ' +
-                    'Markets are readable via direct browser access to the app file.</div>';
+                    '⚠️ Could not reach Kalshi markets. Check your connection or try refreshing.</div>';
                 return;
             }
-            if (events.length === 0) {
-                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">No open Kalshi markets found.</div>';
+            if (!events || events.length === 0) {
+                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">No open ' + sport.toUpperCase() + ' markets found on Kalshi right now.<br><span style="font-size:10px;color:#2a3142;">Markets open closer to event time — check back as matches approach.</span></div>';
                 return;
             }
 
-            // Filter events relevant to this sport
-            const keywords = sport === 'tennis'
-                ? ['tennis','atp','wta','wimbledon','miami','open','roland','australian','us open','match']
-                : ['mma','ufc','fight','bout','fighter'];
-
+            // Events are already filtered by sport from fetchKalshiMarkets
             const relevant = events.filter(function(ev) {
-                const t = (ev.title||'').toLowerCase() + ' ' + (ev.sub_title||'').toLowerCase() + ' ' + (ev.series_ticker||'').toLowerCase();
-                return keywords.some(function(k){ return t.includes(k); });
+                return ev.markets && ev.markets.length > 0;
             });
-
-            if (relevant.length === 0) {
-                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">No ' + sport + ' markets currently open on Kalshi.</div>';
-                return;
-            }
 
             let html = '';
             relevant.forEach(function(ev) {
@@ -10301,18 +10373,13 @@ function _showBracketTable() {
             var BASE_WTA = 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard';
             var BASE_GEN = 'https://site.api.espn.com/apis/site/v2/sports/tennis/scoreboard';
 
-            // ESPN tennis endpoints — league= param is NOT supported (returns 400).
-            // Only base scoreboard URLs work. Try dated first, then undated fallbacks.
+            // ESPN tennis endpoints — only site/v2/atp and site/v2/wta work from GitHub Pages
+            // Generic tennis/scoreboard and apis/v2/ paths are blocked by ESPN CORS policy
             var tennisEndpoints = [
-                // Dated (most specific — returns today's matches if any)
                 BASE_ATP + '?dates=' + todayStr,
                 BASE_WTA + '?dates=' + todayStr,
-                BASE_GEN + '?dates=' + todayStr,
-                // Undated base (returns current/active tournament)
                 BASE_ATP,
-                BASE_WTA,
-                BASE_GEN,
-                // Note: apis/v2/ ESPN endpoints blocked from null origin (file://) — removed
+                BASE_WTA
             ];
 
             for (var tIdx = 0; tIdx < tennisEndpoints.length; tIdx++) {
