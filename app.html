@@ -9466,8 +9466,11 @@ function _showBracketTable() {
         window.fetchKalshiMarkets = async function(sport) {
             async function kalshiFetch(path) {
                 const direct = KALSHI_PUBLIC_BASE + path;
-                const proxy  = 'https://corsproxy.io/?' + encodeURIComponent(direct);
-                const proxy2 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(direct);
+                // allorigins confirmed working from GitHub Pages (returned data previously)
+                // corsproxy.io returns 403 from ghill222.github.io — removed
+                const proxy1 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(direct);
+                const proxy2 = 'https://thingproxy.freeboard.io/fetch/' + encodeURIComponent(direct);
+                const proxy3 = 'https://cors.sh/' + direct;
 
                 async function tryUrl(url, ms) {
                     const ctrl = new AbortController();
@@ -9475,13 +9478,23 @@ function _showBracketTable() {
                     try {
                         const r = await fetch(url, { signal: ctrl.signal });
                         clearTimeout(t);
-                        if (!r.ok) return null;
+                        if (!r.ok) { console.warn('Kalshi proxy non-ok:', url.substring(0,50), r.status); return null; }
                         const text = await r.text();
                         const json = JSON.parse(text);
-                        return json.events || (json.contents ? JSON.parse(json.contents).events : null) || null;
-                    } catch(e) { clearTimeout(t); return null; }
+                        // allorigins wraps response in {contents:'...'} — unwrap it
+                        if (json.contents) {
+                            const inner = JSON.parse(json.contents);
+                            return inner.events || null;
+                        }
+                        return json.events || null;
+                    } catch(e) { clearTimeout(t); console.warn('Kalshi fetch error:', url.substring(0,50), e.message); return null; }
                 }
-                return await tryUrl(direct, 5000) || await tryUrl(proxy, 9000) || await tryUrl(proxy2, 9000) || null;
+
+                // Skip direct (always blocked from GitHub Pages) — go straight to proxies
+                return await tryUrl(proxy1, 12000)
+                    || await tryUrl(proxy2, 12000)
+                    || await tryUrl(proxy3, 12000)
+                    || null;
             }
 
             // Fetch all open events — we filter client-side
