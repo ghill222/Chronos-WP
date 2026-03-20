@@ -3066,6 +3066,9 @@ const TEAM_DATABASE = {
     'Oklahoma State Cowboys': { city: 'Oklahoma State', mascot: 'Cowboys', abbrev: 'OKST' },
     'Arkansas Razorbacks': { city: 'Arkansas', mascot: 'Razorbacks', abbrev: 'ARK' },
     'LSU Tigers': { city: 'LSU', mascot: 'Tigers', abbrev: 'LSU' },
+    'Saint Louis Billikens': { city: 'Saint Louis', mascot: 'Billikens', abbrev: 'SLU' },
+    'St. Louis Billikens':   { city: 'Saint Louis', mascot: 'Billikens', abbrev: 'SLU' },
+    'Saint Louis':           { city: 'Saint Louis', mascot: 'Billikens', abbrev: 'SLU' },
     'Georgia Bulldogs': { city: 'Georgia', mascot: 'Bulldogs', abbrev: 'UGA' },
     'South Carolina Gamecocks': { city: 'South Carolina', mascot: 'Gamecocks', abbrev: 'SC' },
     'Missouri Tigers': { city: 'Missouri', mascot: 'Tigers', abbrev: 'MIZ' },
@@ -5141,7 +5144,36 @@ function lookupTeam(teamName) {
                         v4MatchingCalendars: allMatchCals,
                         allThreeLock: trackAllThreeLock,
                         modesAgree:   trackModesAgree,
-                        mergedRule:   trackMergedRule
+                        mergedRule:   trackMergedRule,
+                        // Variation that drove the winning lock — inferred from conviction label
+                        winnerVariation: (function() {
+                            const lbl = (chronos.winnerConviction && chronos.winnerConviction.label) || '';
+                            if (/mascot|abbrev.*ar.*dpm|golden.key/i.test(lbl)) return 'mascot';
+                            if (/city.*gd|structural/i.test(lbl)) return 'city';
+                            if (/abbrev.*ld|speed/i.test(lbl)) return 'abbrev';
+                            if (/full.*name|baseline/i.test(lbl)) return 'full';
+                            // Fallback: derive from which variation produced the highest calScore
+                            try {
+                                const wVars = generateTeamVariations(trackMergedWinner);
+                                const wVW   = calculateAllCalendarsVW(new Date(gameData.startTime || Date.now()));
+                                const varScores = {};
+                                ['full','city','mascot','abbrev'].forEach(function(vk) {
+                                    var txt = wVars[vk] || trackMergedWinner;
+                                    var score = 0;
+                                    Object.values(CIPHERS).forEach(function(cfn) {
+                                        var rd = calculateDigitalRoot(cfn(txt));
+                                        Object.values(wVW).forEach(function(vw) {
+                                            if (rd.root === vw.un)  score += 4;
+                                            if (rd.root === vw.gd)  score += 3;
+                                            if (rd.root === vw.ld)  score += 2;
+                                            if (rd.root === vw.dpm) score += 5;
+                                        });
+                                    });
+                                    varScores[vk] = score;
+                                });
+                                return Object.keys(varScores).reduce(function(a, b) { return varScores[a] >= varScores[b] ? a : b; });
+                            } catch(e) { return 'full'; }
+                        })()
                     };
                     console.log('📅 V4 Calendar [' + modelVer + ']: ' + v4CalendarData.v4Winner + ' via [' + v4CalendarData.v4MatchingCalendars.join(', ') + '] @ ' + v4CalendarData.v4Conviction + '%');
                 } catch(e) {
@@ -6284,11 +6316,23 @@ function lookupTeam(teamName) {
                             const resultHome = (result.homeTeam || '').toLowerCase();
                             const resultAway = (result.awayTeam || '').toLowerCase();
                             const pickWinner = (pick.winner || '').toLowerCase();
-                            if (resultHome !== pickWinner && resultAway !== pickWinner) continue;
-                            if (result.actualHomeScore === null) continue;
+                            // Match on full name OR last word (mascot) of team name
+                            const resultHomeMascot = resultHome.split(' ').pop();
+                            const resultAwayMascot = resultAway.split(' ').pop();
+                            const pickMascot = pickWinner.split(' ').pop();
+                            const nameMatch = resultHome === pickWinner || resultAway === pickWinner ||
+                                              resultHomeMascot === pickMascot || resultAwayMascot === pickMascot;
+                            if (!nameMatch) continue;
+                            // CRITICAL: only resolve if game is actually FINAL — not live, not pregame
+                            // Checking isFinal flag AND that scores are not null
+                            const gameIsFinal = result.isFinal === true ||
+                                (result.statusText && /final|completed/i.test(result.statusText));
+                            if (!gameIsFinal) continue;
+                            if (result.actualHomeScore === null || result.actualAwayScore === null) continue;
                             // Match found — check if pick was correct
                             const actualHomeWon = result.actualHomeScore > result.actualAwayScore;
-                            const pickWasHome = resultHome === pickWinner;
+                            const pickWasHome = resultHome === pickWinner ||
+                                                resultHomeMascot === pickMascot;
                             pick.legResult = (pickWasHome === actualHomeWon) ? 'hit' : 'miss';
                             if (pick.legResult === 'hit') legsHit++;
                             updated = true;
@@ -7073,9 +7117,9 @@ function lookupTeam(teamName) {
                 html += '<td style="padding:5px 8px;color:#fff;font-weight:700;">'+sp.toUpperCase()+'</td>';
                 html += '<td style="padding:5px 8px;color:#8b92a7;">'+s.n+'</td>';
                 html += '<td style="padding:5px 8px;color:'+(parseFloat(aP)>=60?'#10b981':'#f59e0b')+';">'+s.aW+'-'+(s.n-s.aW)+'</td>';
-                html += '<td style="padding:5px 8px;color:'+(parseFloat(aP)>=60?'#10b981':'#f59e0b');+'font-weight:700;">'+aP+'%</td>';
+                html += '<td style="padding:5px 8px;font-weight:700;color:'+(parseFloat(aP)>=60?'#10b981':'#f59e0b')+';">'+aP+'%</td>';
                 html += '<td style="padding:5px 8px;color:'+(parseFloat(bP)>=60?'#10b981':'#f59e0b')+';">'+s.bW+'-'+(s.n-s.bW)+'</td>';
-                html += '<td style="padding:5px 8px;color:'+(parseFloat(bP)>=60?'#10b981':'#f59e0b');+'font-weight:700;">'+bP+'%</td>';
+                html += '<td style="padding:5px 8px;font-weight:700;color:'+(parseFloat(bP)>=60?'#10b981':'#f59e0b')+';">'+bP+'%</td>';
                 html += '<td style="padding:5px 8px;color:'+winCol+';font-weight:800;">'+winner+'</td>';
                 html += '<td style="padding:5px 8px;color:#4a5568;">'+(s.agree/s.n*100).toFixed(0)+'%</td>';
                 html += '<td style="padding:5px 8px;color:#667eea;">'+s.aOnly+'</td>';
@@ -7133,11 +7177,20 @@ function lookupTeam(teamName) {
 
             const rules = [
                 {rule:'High conviction (A≥85%) + disagree', n:highConvDis.length, aW:highConvAWins, bW:highConvDis.length-highConvAWins,
-                 verdict: highConvDis.length>0 && highConvAWins/highConvDis.length>=0.6 ? 'TRUST A when conviction ≥85%' : 'Insufficient signal'},
+                 verdict: highConvDis.length===0 ? 'No data yet' :
+                          highConvAWins/highConvDis.length>=0.6 ? 'TRUST A when conviction ≥85%' :
+                          (highConvDis.length-highConvAWins)/highConvDis.length>=0.6 ? 'TRUST B — A conviction misleading' :
+                          'Signal emerging — ' + (highConvAWins/highConvDis.length*100).toFixed(0) + '% A accuracy'},
                 {rule:'Large B margin (≥100pts) + disagree', n:largeMargDis.length, aW:largeMargDis.length-largeMargBWins, bW:largeMargBWins,
-                 verdict: largeMargDis.length>0 && largeMargBWins/largeMargDis.length>=0.6 ? 'TRUST B when margin ≥100pts' : 'Insufficient signal'},
+                 verdict: largeMargDis.length===0 ? 'No data yet' :
+                          largeMargBWins/largeMargDis.length>=0.6 ? 'TRUST B when margin ≥100pts' :
+                          (largeMargDis.length-largeMargBWins)/largeMargDis.length>=0.6 ? 'TRUST A — B margin misleading here' :
+                          'Signal emerging — ' + (largeMargBWins/largeMargDis.length*100).toFixed(0) + '% B accuracy'},
                 {rule:'Small B margin (<30pts) + disagree', n:smallMargDis.length, aW:smallMargAWins, bW:smallMargDis.length-smallMargAWins,
-                 verdict: smallMargDis.length>0 && smallMargAWins/smallMargDis.length>=0.6 ? 'TRUST A when margin <30pts' : 'Insufficient signal'},
+                 verdict: smallMargDis.length===0 ? 'No data yet' :
+                          smallMargAWins/smallMargDis.length>=0.6 ? 'TRUST A when margin <30pts' :
+                          (smallMargDis.length-smallMargAWins)/smallMargDis.length>=0.6 ? 'TRUST B — A unreliable on close games' :
+                          'Signal emerging — ' + (smallMargAWins/smallMargDis.length*100).toFixed(0) + '% A accuracy'},
             ];
             rules.forEach(function(r){
                 const pct = r.n>0?(r.aW/r.n*100).toFixed(0):'0';
@@ -8705,7 +8758,7 @@ function _showBracketTable() {
                     <!-- Daily Parlay -->
                     <div class="lab-section" style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 24px;">
                         <h2 style="color: #fff; margin-bottom: 16px;">🏆 Daily Parlay - Highest Conviction Plays</h2>
-                        <div id="daily-parlay">
+                        <div id="daily-parlay" style="max-height:70vh;overflow-y:auto;padding-right:4px;scrollbar-width:thin;scrollbar-color:#2a3142 #0a0e15;">
                             <div style="color: #8b92a7; padding: 40px; text-align: center;">
                                 Loading today's highest conviction plays across all sports...
                             </div>
@@ -8807,6 +8860,8 @@ function _showBracketTable() {
             html += '<span style="color:#8b92a7;font-size:11px;">Date:</span>';
             html += '<button onclick="(function(){var d=document.getElementById(\'tape-game-date\');if(!d.value)return;var dt=new Date(d.value+\'T12:00:00\');dt.setDate(dt.getDate()-1);d.value=dt.toISOString().split(\'T\')[0];})()" title="Previous day" style="padding:3px 9px;background:#1a2535;border:1px solid #2a3142;border-radius:4px;color:#93c5fd;font-size:13px;cursor:pointer;">◀</button>';
             html += '<input id="tape-game-date" type="date" value="' + (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})() + '" style="padding:6px 10px;background:#1a2535;border:1px solid #3b82f655;border-radius:4px;color:#e8e8e8;font-size:12px;color-scheme:dark;filter:brightness(1.3);">';
+            html += '<input id="tape-game-time" type="time" placeholder="Game time (opt.)" title="Enter game start time to match V4 sidebar VW calculation" style="padding:6px 10px;background:#1a2535;border:1px solid #3b82f655;border-radius:4px;color:#e8e8e8;font-size:12px;color-scheme:dark;filter:brightness(1.3);width:120px;">';
+            html += '<span style="font-size:9px;color:#4a5568;white-space:nowrap;" title="Adding game start time aligns Mode A cipher calculation with the sidebar — use when checking a specific scheduled game">⏰ = sidebar alignment</span>';
             html += '<button onclick="(function(){var d=document.getElementById(\'tape-game-date\');if(!d.value)return;var dt=new Date(d.value+\'T12:00:00\');dt.setDate(dt.getDate()+1);d.value=dt.toISOString().split(\'T\')[0];})()" title="Next day" style="padding:3px 9px;background:#1a2535;border:1px solid #2a3142;border-radius:4px;color:#93c5fd;font-size:13px;cursor:pointer;">▶</button>';
             html += '<button onclick="runTapeCalculator()" style="padding: 12px 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; letter-spacing: .5px;">⚖️ Run Tale of the Tape</button>';
             html += '</div>';
@@ -9460,7 +9515,11 @@ function _showBracketTable() {
             // ── VW for selected game date (local noon to avoid UTC date shift) ──
             var _localToday = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
             var _tapeDate = tapeDateVal || _localToday;
-            var allVW = calculateAllCalendarsVW(new Date(_tapeDate + 'T12:00:00'));
+            var _tapeTimeVal = (document.getElementById('tape-game-time') || {}).value || '';
+            // If game time is entered, use it for VW calculation — aligns Mode A with sidebar
+            var _tapeDateTimeStr = _tapeDate + (_tapeTimeVal ? 'T' + _tapeTimeVal + ':00' : 'T12:00:00');
+            var _tapeDateObj = new Date(_tapeDateTimeStr);
+            var allVW = calculateAllCalendarsVW(_tapeDateObj);
             var calKeys = ['gregorian','ancient_roman','unc','ifc','ethiopian','pure_sol','future_gregorian','future_gregorian_plus2','gemini_rolling'];
             var CAL_LABELS = {
                 gregorian: 'Gregorian', ancient_roman: 'Anc. Roman', unc: 'UNC Network',
@@ -9558,7 +9617,9 @@ function _showBracketTable() {
             //   (a) boost confidence when it agrees with tape winner
             //   (b) show a dissent note when it picks the opponent
             var modeAResult = null;
-            try { modeAResult = predictGameWinner(pA.name, pB.name, new Date()); } catch(e) {}
+            // Use game datetime if entered — matches sidebar Mode A calculation
+            var _modeATime = (typeof _tapeDateObj !== 'undefined') ? _tapeDateObj : new Date();
+            try { modeAResult = predictGameWinner(pA.name, pB.name, _modeATime); } catch(e) {}
             var modeAWinnerName = modeAResult ? modeAResult.winner : null;
             var modeAConvPct    = modeAResult && modeAResult.winnerConviction ? modeAResult.winnerConviction.percentage : 0;
             var modeAConvLabel  = modeAResult && modeAResult.winnerConviction
@@ -10292,6 +10353,31 @@ function _showBracketTable() {
             
             // Collect all games from all sports (today + tomorrow for fuller pool)
             const allPredictions = [];
+            const allLockPicks = [];      // master list
+            const todayLockPicks = [];
+            // 4-signal
+            const allQuadLocks = [], todayQuadLocks = [];
+            // 3-signal
+            const allABV2 = [], todayABV2 = [];   // A+B+V2
+            const allABVG = [], todayABVG = [];   // A+B+Vegas
+            const allAV2VG = [], todayAV2VG = []; // A+V2+Vegas
+            const allBV2VG = [], todayBV2VG = []; // B+V2+Vegas
+            // 2-signal
+            const allAB = [], todayAB = [];       // A+B only
+            const allV2VG = [], todayV2VG = [];   // V2+Vegas
+            const allAV2 = [], todayAV2 = [];     // A+V2
+            const allBV2 = [], todayBV2 = [];     // B+V2
+            const allAVG = [], todayAVG = [];     // A+Vegas
+            const allBVG = [], todayBVG = [];     // B+Vegas
+
+            // Trap gate helpers (inline in fetch loop)
+            function _lockDR(n) { while(n>9) n=String(n).split('').reduce((s,d)=>s+parseInt(d),0); return n; }
+            function _lockOrdRoot(name) {
+                const clean=(name||'').replace(/[^A-Za-z]/g,'').toUpperCase();
+                let s=0; for(let i=0;i<clean.length;i++) s+=clean.charCodeAt(i)-64;
+                return _lockDR(s);
+            }
+
             const sports = ['nba', 'nfl', 'cbb', 'cfb', 'nhl', 'mlb', 'soccer'];
             // Soccer leagues to check
             const soccerLeagues = ['eng.1','usa.1','uefa.champions','esp.1','ger.1','ita.1','fra.1'];
@@ -10322,7 +10408,9 @@ function _showBracketTable() {
 
                     for (const event of data.events) {
                         const comp = event.competitions[0];
-                        if (comp.status.type.state !== 'pre') continue;
+                        // Allow 'pre' and 'in' (live) — lock badges should show for ongoing games too
+                        const _gameState = comp.status.type.state;
+                        if (_gameState !== 'pre' && _gameState !== 'in') continue;
                         const homeTeam = comp.competitors.find(t => t.homeAway === 'home')?.team.displayName;
                         const awayTeam = comp.competitors.find(t => t.homeAway === 'away')?.team.displayName;
                         if (!homeTeam || !awayTeam) continue;
@@ -10369,24 +10457,129 @@ function _showBracketTable() {
                                               calCount >= 4 ? 10 :
                                               calCount >= 3 ? 5  : 0;
 
-                        // Run conviction engine for label (winner choice already determined by tape)
+                        // ── Run conviction engine (used for parlay scoring AND Mode A lock signal) ──
                         const v4pred = predictGameWinner(homeTeam, awayTeam, gameTime);
-                        const convLabel = v4pred.winner === tapeWinner
+
+                        // ── LOCK DETECTION — runs for ALL pregame games BEFORE stringency filter ──
+                        // This fixes the bug where the 3-cal `continue` blocked genuine lock games
+                        // from ever being evaluated. Locks now populate independently of VW margins.
+                        {
+                            let _lockVegasFav = null;
+                            try {
+                                const _odds = (comp.odds || [])[0];
+                                if (_odds && _odds.spread != null) {
+                                    const _vs = parseFloat(_odds.spread);
+                                    if (!isNaN(_vs)) _lockVegasFav = _vs < 0 ? homeTeam : awayTeam;
+                                } else if (_odds && _odds.details) {
+                                    const _dp = String(_odds.details).replace(/[^0-9.+-]/g,'');
+                                    const _dv = parseFloat(_dp);
+                                    if (!isNaN(_dv)) _lockVegasFav = _dv < 0 ? homeTeam : awayTeam;
+                                }
+                            } catch(e) {}
+
+                            let _v2Winner = null;
+                            try {
+                                if (sport === 'nba' || sport === 'cbb') {
+                                    const _bResult = getBasketballModelSpread(homeTeam, awayTeam, sport);
+                                    if (_bResult && _bResult.modelSpread != null && !isNaN(_bResult.modelSpread))
+                                        _v2Winner = _bResult.modelSpread <= 0 ? homeTeam : awayTeam;
+                                } else {
+                                    const _mRatings = getModelRatingsForGame(homeTeam, awayTeam, sport);
+                                    if (_mRatings && _mRatings.modelSpread != null)
+                                        _v2Winner = _mRatings.modelSpread <= 0 ? homeTeam : awayTeam;
+                                }
+                                if (!_v2Winner) {
+                                    gameWPs.forEach((gEntry) => {
+                                        if (_v2Winner) return;
+                                        if (!gEntry.data || !gEntry.result) return;
+                                        if (gEntry.data.homeTeam === homeTeam && gEntry.data.awayTeam === awayTeam) {
+                                            const _sp = gEntry.result.predictedSpread;
+                                            if (_sp != null) _v2Winner = _sp < 0 ? homeTeam : awayTeam;
+                                        }
+                                    });
+                                }
+                            } catch(e) {}
+
+                            const _aTG = _lockOrdRoot(awayTeam), _hTG = _lockOrdRoot(homeTeam);
+                            const _gA = _lockDR(_aTG + _hTG), _gB = _lockDR((_aTG+1)+(_hTG+2));
+                            const _trapped = (_gA===4||_gA===7) && (_gB===4||_gB===7);
+
+                            if (!_trapped) {
+                                // Mode A: requires genuine conviction ≥70% to count as a real signal.
+                                // Without this gate, weak gematria fallbacks (where predictGameWinner
+                                // defaults to the VW-dominant team) falsely confirm Mode A agreement.
+                                const _modeAConv = v4pred && v4pred.winner === tapeWinner
+                                    ? (v4pred.winnerConviction ? v4pred.winnerConviction.percentage : 0)
+                                    : (v4pred && v4pred.loser === tapeWinner
+                                        ? (v4pred.loserConviction ? v4pred.loserConviction.percentage : 0)
+                                        : 0);
+                                const _sigA  = v4pred && v4pred.winner === tapeWinner && _modeAConv >= 70;
+                                const _sigV2 = _v2Winner ? _v2Winner === tapeWinner : null;
+                                const _sigVG = _lockVegasFav ? _lockVegasFav === tapeWinner : null;
+
+                                const _isToday = dateStr === buildDateStr(0);
+                                const _lkCals = (TAPE_CAL_KEYS || Object.keys(allVW)).filter(ck => {
+                                    const ws = winnerTS.calScores && winnerTS.calScores[ck] || 0;
+                                    const ls = loserTS.calScores && loserTS.calScores[ck] || 0;
+                                    return ws >= 15 && (ws - ls) >= 8;
+                                });
+
+                                const _lk_AB    = _sigA === true;
+                                const _lk_V2VG  = _sigV2 === true && _sigVG === true;
+                                const _lk_AV2   = _sigA === true && _sigV2 === true;
+                                const _lk_BV2   = _sigV2 === true;
+                                const _lk_AVG   = _sigA === true && _sigVG === true;
+                                const _lk_BVG   = _sigVG === true;
+                                const _lk_ABV2  = _sigA === true && _sigV2 === true;
+                                const _lk_ABVG  = _sigA === true && _sigVG === true;
+                                const _lk_AV2VG = _sigA === true && _sigV2 === true && _sigVG === true;
+                                const _lk_BV2VG = _sigV2 === true && _sigVG === true;
+                                const _lk_QUAD  = _sigA === true && _sigV2 === true && _sigVG === true;
+
+                                function _mkPick(lockType, bonus, label) {
+                                    return {
+                                        winner: tapeWinner, loser: tapeLosing, homeTeam, awayTeam,
+                                        sport, sportEmoji: sportConfig.emoji||'🎯', gameTime,
+                                        winnerConviction: { percentage: Math.min(99, Math.round(50+(margin/120)*45)+bonus), label },
+                                        matchingCalendars: _lkCals, supportingCals: _lkCals,
+                                        tapeMargin: margin, lockType, isToday: _isToday,
+                                        v2Available: _v2Winner !== null, modeAConv: _modeAConv
+                                    };
+                                }
+
+                                if (_lk_QUAD)                               { const p=_mkPick('quad',25,'⚡ PERFECT STORM'); allQuadLocks.push(p); if(_isToday) todayQuadLocks.push(p); allLockPicks.push(p); if(_isToday) todayLockPicks.push(p); }
+                                if (_lk_ABV2  && !_lk_QUAD)                { const p=_mkPick('ab_v2',16,'🔮 ORACLE'); allABV2.push(p); if(_isToday) todayABV2.push(p); }
+                                if (_lk_ABVG  && !_lk_QUAD)                { const p=_mkPick('ab_vg',16,'🎯 PHANTOM'); allABVG.push(p); if(_isToday) todayABVG.push(p); }
+                                if (_lk_AV2VG && !_lk_QUAD)                { const p=_mkPick('a_v2vg',16,'🔑 MASTER KEY'); allAV2VG.push(p); if(_isToday) todayAV2VG.push(p); }
+                                if (_lk_BV2VG && !_lk_QUAD)                { const p=_mkPick('b_v2vg',16,'🧭 COMPASS'); allBV2VG.push(p); if(_isToday) todayBV2VG.push(p); }
+                                if (_lk_AB    && !_lk_ABV2 && !_lk_ABVG)  { const p=_mkPick('ab',10,'🌀 TWIN SIGNAL'); allAB.push(p); if(_isToday) todayAB.push(p); }
+                                if (_lk_V2VG  && !_lk_BV2VG)              { const p=_mkPick('v2vg',10,'💡 MARKET ALIGNMENT'); allV2VG.push(p); if(_isToday) todayV2VG.push(p); }
+                                if (_lk_AV2   && !_lk_ABV2 && !_lk_AV2VG){ const p=_mkPick('av2',10,'🔬 CONVICTION+MODEL'); allAV2.push(p); if(_isToday) todayAV2.push(p); }
+                                if (_lk_BV2   && !_lk_ABV2 && !_lk_BV2VG){ const p=_mkPick('bv2',10,'📊 FREQUENCY+MODEL'); allBV2.push(p); if(_isToday) todayBV2.push(p); }
+                                if (_lk_AVG   && !_lk_ABVG && !_lk_AV2VG){ const p=_mkPick('avg',10,'⚔️ CONVICTION+MARKET'); allAVG.push(p); if(_isToday) todayAVG.push(p); }
+                                if (_lk_BVG   && !_lk_ABVG && !_lk_BV2VG){ const p=_mkPick('bvg',10,'🌊 FREQUENCY+MARKET'); allBVG.push(p); if(_isToday) todayBVG.push(p); }
+                            }
+                        }
+
+                        // ── PARLAY STRINGENCY FILTER — only for allPredictions, NOT for locks ──
+                        // Lock detection above already ran for all games regardless of this gate.
+                        const convLabel = v4pred && v4pred.winner === tapeWinner
                             ? v4pred.winnerConviction
-                            : (v4pred.loser === tapeWinner
+                            : (v4pred && v4pred.loser === tapeWinner
                                 ? v4pred.loserConviction
                                 : { percentage: 55, label: 'TAPE ONLY', reasoning: [], matchingCalendars: [] });
 
-                        // Final conviction % = tape margin score + multi-cal bonus
                         const tapeConfPct = Math.min(97, Math.round(50 + (margin / 120) * 45) + multiCalBonus);
 
                         const effectiveConviction = {
-                            percentage: Math.max(convLabel.percentage, tapeConfPct),
-                            label: convLabel.label || 'TAPE SCORE',
-                            reasoning: convLabel.reasoning || [],
+                            percentage: Math.max((convLabel && convLabel.percentage) || 55, tapeConfPct),
+                            label: (convLabel && convLabel.label) || 'TAPE SCORE',
+                            reasoning: (convLabel && convLabel.reasoning) || [],
                             matchingCalendars: supportingCals
                         };
 
+                        // Apply stringency gates — skip games that don't meet all three
+                        if (calCount < 3 || margin < minMargin || scoreRatio < minRatio) continue;
                         allPredictions.push({
                             winner:            tapeWinner,
                             loser:             tapeLosing,
@@ -10473,7 +10666,51 @@ function _showBracketTable() {
             // Create parlays (max 5 picks per parlay)
             let parlays = [];
             
-            // PRIORITY 0: Bifurcation Zone (3+ calendar agreement — highest certainty)
+            // ── LOCK PARLAY ASSEMBLY — 11 tiers, highest confidence first ──
+            // Each tier only renders if it has ≥2 picks. Today-only shown before multi-day.
+            // Tooltip describes exactly which signals fired.
+            function _addLockParlay(arr, todayArr, tier, title, subtitle, todayOnly) {
+                const src = todayOnly ? todayArr : arr;
+                // Only show multi-day if it adds games beyond today
+                if (!todayOnly && arr.length <= todayArr.length) return;
+                if (src.length < 2) return;
+                const sfx = todayOnly ? ' — TODAY' : ' — Today+Tomorrow';
+                parlays.unshift({
+                    title: title + sfx,
+                    subtitle: subtitle,
+                    picks: src.slice(0, 8),
+                    avgConviction: Math.round(src.slice(0,8).reduce((s,p)=>s+p.winnerConviction.percentage,0)/Math.min(8,src.length)),
+                    tier: tier
+                });
+            }
+
+            // 2-signal combos (today + multi-day)
+            _addLockParlay(allBVG,  todayBVG,  'bvg',   '🌊 FREQUENCY + MARKET PARLAY', 'Tape VW cipher frequency AND Vegas market both favor same winner.', false);
+            _addLockParlay(allBVG,  todayBVG,  'bvg',   '🌊 FREQUENCY + MARKET PARLAY', 'Tape VW cipher frequency AND Vegas market both favor same winner.', true);
+            _addLockParlay(allAVG,  todayAVG,  'avg',   '⚔️ CONVICTION + MARKET PARLAY', 'V4 conviction cipher engine AND Vegas market agree on the winner.', false);
+            _addLockParlay(allAVG,  todayAVG,  'avg',   '⚔️ CONVICTION + MARKET PARLAY', 'V4 conviction cipher engine AND Vegas market agree on the winner.', true);
+            _addLockParlay(allBV2,  todayBV2,  'bv2',   '📊 FREQUENCY + MODEL PARLAY', 'Tape VW frequency AND V2 statistical model agree. Vegas not required.', false);
+            _addLockParlay(allBV2,  todayBV2,  'bv2',   '📊 FREQUENCY + MODEL PARLAY', 'Tape VW frequency AND V2 statistical model agree. Vegas not required.', true);
+            _addLockParlay(allAV2,  todayAV2,  'av2',   '🔬 CONVICTION + MODEL PARLAY', 'V4 conviction engine AND V2 statistical model agree. Strong value signal when Vegas differs.', false);
+            _addLockParlay(allAV2,  todayAV2,  'av2',   '🔬 CONVICTION + MODEL PARLAY', 'V4 conviction engine AND V2 statistical model agree. Strong value signal when Vegas differs.', true);
+            _addLockParlay(allV2VG, todayV2VG, 'v2vg',  '💡 MARKET ALIGNMENT PARLAY', 'V2 statistical model AND Vegas market agree. Pure numbers — no gematria required.', false);
+            _addLockParlay(allV2VG, todayV2VG, 'v2vg',  '💡 MARKET ALIGNMENT PARLAY', 'V2 statistical model AND Vegas market agree. Pure numbers — no gematria required.', true);
+            _addLockParlay(allAB,   todayAB,   'ab',    '🌀 TWIN SIGNAL PARLAY', 'Both V4 prediction modes (conviction engine + tape VW) agree. V2/Vegas may differ — potential value against the market.', false);
+            _addLockParlay(allAB,   todayAB,   'ab',    '🌀 TWIN SIGNAL PARLAY', 'Both V4 prediction modes (conviction engine + tape VW) agree. V2/Vegas may differ — potential value against the market.', true);
+            // 3-signal combos
+            _addLockParlay(allBV2VG,  todayBV2VG,  'b_v2vg',  '🧭 COMPASS PARLAY', 'Tape VW frequency, V2 statistical model, AND Vegas all agree on the same winner. Mode A (cipher conviction) is the only remaining signal.', false);
+            _addLockParlay(allBV2VG,  todayBV2VG,  'b_v2vg',  '🧭 COMPASS PARLAY', 'Tape VW frequency, V2 statistical model, AND Vegas all agree on the same winner. Mode A (cipher conviction) is the only remaining signal.', true);
+            _addLockParlay(allAV2VG,  todayAV2VG,  'a_v2vg',  '🔑 MASTER KEY PARLAY', 'V4 conviction cipher engine, V2 statistical model, AND Vegas all agree. Three major systems aligned.', false);
+            _addLockParlay(allAV2VG,  todayAV2VG,  'a_v2vg',  '🔑 MASTER KEY PARLAY', 'V4 conviction cipher engine, V2 statistical model, AND Vegas all agree. Three major systems aligned.', true);
+            _addLockParlay(allABVG,   todayABVG,   'ab_vg',   '🎯 PHANTOM PARLAY', 'Both V4 prediction modes AND Vegas market agree. V2 model pending — three systems locked.', false);
+            _addLockParlay(allABVG,   todayABVG,   'ab_vg',   '🎯 PHANTOM PARLAY', 'Both V4 prediction modes AND Vegas market agree. V2 model pending — three systems locked.', true);
+            _addLockParlay(allABV2,   todayABV2,   'ab_v2',   '🔮 ORACLE PARLAY', 'Both V4 prediction modes AND V2 statistical model agree. Vegas differs — strong value play against the market.', false);
+            _addLockParlay(allABV2,   todayABV2,   'ab_v2',   '🔮 ORACLE PARLAY', 'Both V4 prediction modes AND V2 statistical model agree. Vegas differs — strong value play against the market.', true);
+            // 4-signal (highest — added last so unshift puts them at top)
+            _addLockParlay(allQuadLocks, todayQuadLocks, 'quad_lock', '⚡ PERFECT STORM PARLAY', 'All 4 systems agree: V4 Mode A + Mode B + V2 Statistical + Vegas. Zero dissent anywhere. Rarest and highest confidence signal in the entire system.', false);
+            _addLockParlay(allQuadLocks, todayQuadLocks, 'quad_lock', '⚡ PERFECT STORM PARLAY', 'All 4 systems agree: V4 Mode A + Mode B + V2 Statistical + Vegas. Zero dissent anywhere. Rarest and highest confidence signal in the entire system.', true);
+
+                        // PRIORITY 0: Bifurcation Zone (3+ calendar agreement — highest certainty)
             if (bifurcationPicks.length > 0) {
                 parlays.push({
                     title: '🔥 Bifurcation Zone',
@@ -10883,7 +11120,21 @@ function _showBracketTable() {
             let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 16px; margin-top: 16px;">';
             
             parlays.forEach((parlay, idx) => {
-                const borderColor = parlay.tier === 'bifurcation' ? '#ff6b35' :
+                const borderColor = parlay.tier === 'quad_lock' ? '#f59e0b' :  // amber — highest
+                                  parlay.tier === 'ab_v2'    ? '#a78bfa' :  // purple — A+B+V2
+                                  parlay.tier === 'ab_vg'    ? '#10b981' :  // green — A+B+Vegas
+                                  parlay.tier === 'a_v2vg'   ? '#06b6d4' :  // cyan — A+V2+Vegas
+                                  parlay.tier === 'b_v2vg'   ? '#3b82f6' :  // blue — B+V2+Vegas
+                                  parlay.tier === 'ab'       ? '#34d399' :  // mint — A+B only
+                                  parlay.tier === 'v2vg'     ? '#f97316' :  // orange — V2+Vegas
+                                  parlay.tier === 'av2'      ? '#8b5cf6' :  // violet — A+V2
+                                  parlay.tier === 'bv2'      ? '#60a5fa' :  // light blue — B+V2
+                                  parlay.tier === 'avg'      ? '#4ade80' :  // light green — A+Vegas
+                                  parlay.tier === 'bvg'      ? '#86efac' :  // pale green — B+Vegas
+                                  parlay.tier === 'full_lock'   ? '#ffffff' :
+                                  parlay.tier === 'triple_lock' ? '#10b981' :
+                                  parlay.tier === 'all3_lock'   ? '#34d399' :
+                                  parlay.tier === 'bifurcation' ? '#ff6b35' :
                                   parlay.tier === 'golden' ? '#fbbf24' :
                                   parlay.tier === 'structural' ? '#8b5cf6' :
                                   parlay.tier === 'identity' ? '#10b981' :
@@ -10942,7 +11193,22 @@ function _showBracketTable() {
                         html += '<span style="color:#667eea;margin-left:5px;">' + calendars + '</span>';
                         html += '</div>';
                     }
-                    html += '<div style="color:#8b92a7;font-size:10px;margin-top:2px;">📅 ' + gameDate + (gameTimeStr ? ' | ' + gameTimeStr : '') + '</div>';
+                    // Check if this game is live
+                    const _pickIsLive = (function() {
+                        for (const [, gd] of gameWPs) {
+                            if (!gd.data) continue;
+                            const gh = (gd.data.homeTeam||'').toLowerCase();
+                            const ga = (gd.data.awayTeam||'').toLowerCase();
+                            const pw = (p.winner||'').toLowerCase();
+                            const wm = gh===pw||ga===pw||gh.split(' ').pop()===pw.split(' ').pop()||ga.split(' ').pop()===pw.split(' ').pop();
+                            if (wm && gd.data.isLive) return true;
+                        }
+                        return false;
+                    })();
+                    const _pickTimeHtml = _pickIsLive
+                        ? '<span style="background:#ef444422;color:#ef4444;font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;border:1px solid #ef444455;">🔴 LIVE</span>'
+                        : '📅 ' + gameDate + (gameTimeStr ? ' | ' + gameTimeStr : '');
+                    html += '<div style="color:#8b92a7;font-size:10px;margin-top:2px;">' + _pickTimeHtml + '</div>';
                     html += '</div>';
                 });
                 
@@ -11223,6 +11489,52 @@ function _showBracketTable() {
             };
         }
         
+        // ── Backfill winnerVariation on historical accuracy records ──
+        // Computes which of 4 name variations scored highest VW for the actual winner
+        function backfillVariationData() {
+            const log = Array.from(accuracyTracker.results ? accuracyTracker.results.values() : []);
+            if (!log.length) { alert('No accuracy records found. Play some games first.'); return; }
+            let updated = 0;
+            log.forEach(function(record) {
+                if (record.winnerVariation) return; // already tagged
+                const actualWinner = record.homeWon ? record.homeTeam : record.awayTeam;
+                if (!actualWinner) return;
+                try {
+                    const gameDate = record.gameDate ? new Date(record.gameDate) : new Date();
+                    const allVW = calculateAllCalendarsVW(gameDate);
+                    const wVars = generateTeamVariations(actualWinner);
+                    const varScores = {};
+                    ['full','city','mascot','abbrev'].forEach(function(vk) {
+                        var txt = wVars[vk] || actualWinner;
+                        var score = 0;
+                        Object.values(CIPHERS).forEach(function(cfn) {
+                            var rd = calculateDigitalRoot(cfn(txt));
+                            Object.values(allVW).forEach(function(vw) {
+                                if (!vw) return;
+                                if (rd.root === vw.un)  score += 4;
+                                if (rd.root === vw.gd)  score += 3;
+                                if (rd.root === vw.ld)  score += 2;
+                                if (rd.root === vw.dpm) score += 5;
+                            });
+                        });
+                        varScores[vk] = score;
+                    });
+                    record.winnerVariation = Object.keys(varScores).reduce(function(a,b){ return varScores[a]>=varScores[b]?a:b; });
+                    updated++;
+                } catch(e) {}
+            });
+            // Save updated records back — results is a Map, use tracker's save method
+            try {
+                if (accuracyTracker.saveToStorage) accuracyTracker.saveToStorage();
+                else if (accuracyTracker.storage_key) {
+                    const arr = Array.from(accuracyTracker.results.values());
+                    localStorage.setItem(accuracyTracker.storage_key, JSON.stringify({ results: arr }));
+                }
+            } catch(e) {}
+            alert('Backfilled variation data for ' + updated + ' of ' + log.length + ' records.');
+            renderAccuracyDashboard();
+        }
+
         function renderAccuracyDashboard() {
             // Save cursor position in search input before re-render
             let searchCursorPosition = null;
@@ -11563,7 +11875,7 @@ function _showBracketTable() {
 
                                 // Recent parlay log
                                 phtml += '<h3 style="color: #fff; font-size: 14px; margin-bottom: 10px;">Recent Parlays</h3>';
-                                phtml += '<div style="overflow-x: auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">';
+                                phtml += '<div style="overflow-x:auto;max-height:400px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2a3142 #0a0e15;"><table style="width:100%;border-collapse:collapse;font-size:12px;">';
                                 phtml += '<thead><tr style="color:#8b92a7;border-bottom:1px solid #2a3142;">';
                                 phtml += '<th style="padding:8px;text-align:left;">Date</th><th style="padding:8px;text-align:left;">Parlay</th><th style="padding:8px;text-align:center;">Legs</th><th style="padding:8px;text-align:center;">Conv%</th><th style="padding:8px;text-align:center;">Result</th><th style="padding:8px;text-align:center;">Legs Hit</th><th style="padding:8px;text-align:center;">Actions</th>';
                                 phtml += '</tr></thead><tbody>';
@@ -12501,7 +12813,120 @@ function _showBracketTable() {
                 `;
             }
             
-            // Actions
+            // ── VARIATION WIN RATE REPORT ──────────────────────────────────────────────
+            // Analyses which team name variation (full/city/mascot/abbrev) is hitting the
+            // highest win rate by checking which variation's cipher root matched the winning VW.
+            const varReport = (() => {
+                const allGames = Array.from(accuracyTracker.results ? accuracyTracker.results.values() : []);
+                const resolved = allGames.filter(g => g.result === 'WIN' || g.result === 'LOSS');
+                if (resolved.length < 5) return null;
+
+                // Count variation hits per sport
+                const stats = { full:{ wins:0,total:0 }, city:{ wins:0,total:0 }, mascot:{ wins:0,total:0 }, abbrev:{ wins:0,total:0 } };
+                const bySport = {};
+                const VKEYS = ['full','city','mascot','abbrev'];
+
+                resolved.forEach(g => {
+                    if (!g.winnerVariation) return; // not yet stored
+                    const sport = g.sport || 'unknown';
+                    if (!bySport[sport]) bySport[sport] = { full:{wins:0,total:0}, city:{wins:0,total:0}, mascot:{wins:0,total:0}, abbrev:{wins:0,total:0} };
+                    const v = g.winnerVariation;
+                    if (!VKEYS.includes(v)) return;
+                    stats[v].total++;
+                    bySport[sport][v].total++;
+                    if (g.result === 'WIN') { stats[v].wins++; bySport[sport][v].wins++; }
+                });
+
+                const hasVariationData = VKEYS.some(v => stats[v].total > 0);
+                return { stats, bySport, resolved: resolved.length, hasVariationData };
+            })();
+
+            html += `
+                <div style="background:#1a1f2e;border:1px solid #2a3142;border-radius:8px;padding:20px;margin-bottom:20px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                        <div>
+                            <h2 style="color:#fff;margin:0 0 3px 0;font-size:16px;">📊 Variation Win Rate Report</h2>
+                            <p style="color:#4a5568;font-size:11px;margin:0;">Which team name variation (full / city / mascot / abbrev) is winning most often</p>
+                        </div>
+                        ${varReport && varReport.hasVariationData ? `<span style="background:#10b98122;color:#10b981;font-size:10px;padding:3px 10px;border-radius:4px;border:1px solid #10b98133;">${varReport.resolved} resolved games</span>` : ''}
+                    </div>`;
+
+            if (!varReport || varReport.resolved < 5) {
+                html += `<div style="text-align:center;background:#0a0e15;border-radius:6px;padding:16px;">
+                    <div style="color:#4a5568;font-size:12px;margin-bottom:10px;">
+                        ${varReport ? varReport.resolved : 0} resolved games found.
+                        Need at least 5 to chart, but you can backfill variation tags now.
+                    </div>
+                    <button onclick="backfillVariationData()"
+                        style="background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:5px;color:#fff;padding:8px 20px;font-size:12px;font-weight:700;cursor:pointer;">
+                        🔄 Backfill Variation Data
+                    </button>
+                    <div style="font-size:10px;color:#4a5568;margin-top:8px;">Tags each historical game with which name variation scored highest VW for the actual winner</div>
+                </div>`;
+            } else if (!varReport.hasVariationData) {
+                html += `<div style="text-align:center;background:#0a0e15;border-radius:6px;padding:16px;">
+                    <div style="color:#4a5568;font-size:12px;margin-bottom:12px;">
+                        Variation tracking just enabled — data will accumulate on future predictions.<br>
+                        <span style="font-size:10px;color:#2d3a4e;margin-top:4px;display:block;">Currently ${varReport.resolved} resolved games without variation tags.</span>
+                    </div>
+                    <button onclick="backfillVariationData()"
+                        style="background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:5px;color:#fff;padding:8px 20px;font-size:12px;font-weight:700;cursor:pointer;">
+                        🔄 Backfill ${varReport.resolved} Historical Games
+                    </button>
+                    <div style="font-size:10px;color:#4a5568;margin-top:8px;">Computes which name variation scored highest VW for each actual winner</div>
+                </div>`;
+            } else {
+                const VKEYS = ['full','city','mascot','abbrev'];
+                const VLABELS = { full:'Full Name', city:'City', mascot:'Mascot', abbrev:'Abbrev' };
+                const VCOLORS = { full:'#667eea', city:'#10b981', mascot:'#f59e0b', abbrev:'#a78bfa' };
+
+                // Overall bar chart
+                html += `<div style="margin-bottom:16px;">
+                    <div style="font-size:11px;color:#8b92a7;font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Overall — All Sports</div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">`;
+                const maxTotal = Math.max(...VKEYS.map(v => varReport.stats[v].total)) || 1;
+                VKEYS.forEach(v => {
+                    const s = varReport.stats[v];
+                    const rate = s.total > 0 ? Math.round(s.wins/s.total*100) : 0;
+                    const barW = s.total > 0 ? Math.round(s.total/maxTotal*100) : 0;
+                    const rateColor = rate >= 60 ? '#10b981' : rate >= 50 ? '#f59e0b' : rate > 0 ? '#ef4444' : '#2d3a4e';
+                    html += `<div style="display:flex;align-items:center;gap:8px;">
+                        <div style="width:70px;font-size:11px;color:${VCOLORS[v]};font-weight:700;">${VLABELS[v]}</div>
+                        <div style="flex:1;background:#0a0e15;border-radius:3px;height:18px;position:relative;overflow:hidden;">
+                            <div style="width:${barW}%;height:100%;background:${VCOLORS[v]}22;border-left:2px solid ${VCOLORS[v]};transition:width 0.4s;"></div>
+                        </div>
+                        <div style="width:60px;font-size:11px;color:${rateColor};font-weight:700;text-align:right;">${rate}% <span style="color:#4a5568;font-weight:400;">(${s.wins}/${s.total})</span></div>
+                    </div>`;
+                });
+                html += `</div></div>`;
+
+                // By sport breakdown
+                const sports = Object.keys(varReport.bySport).filter(s => VKEYS.some(v => varReport.bySport[s][v].total > 0));
+                if (sports.length > 0) {
+                    html += `<div style="font-size:11px;color:#8b92a7;font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;">By Sport</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">`;
+                    sports.forEach(sport => {
+                        const sd = varReport.bySport[sport];
+                        const sportLabel = sport.toUpperCase();
+                        html += `<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:6px;padding:10px;">
+                            <div style="font-size:11px;color:#fff;font-weight:700;margin-bottom:8px;">${sportLabel}</div>`;
+                        VKEYS.forEach(v => {
+                            const s = sd[v];
+                            if (s.total === 0) return;
+                            const rate = Math.round(s.wins/s.total*100);
+                            const rateColor = rate >= 60 ? '#10b981' : rate >= 50 ? '#f59e0b' : '#ef4444';
+                            html += `<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;">
+                                <span style="color:${VCOLORS[v]};">${VLABELS[v]}</span>
+                                <span style="color:${rateColor};font-weight:700;">${rate}% <span style="color:#4a5568;">(${s.wins}/${s.total})</span></span>
+                            </div>`;
+                        });
+                        html += `</div>`;
+                    });
+                    html += `</div>`;
+                }
+            }
+            html += `</div>`;
+
             html += `
                     <div class="accuracy-actions">
                         <button onclick="exportFilteredResults()">📥 Export CSV ${activeFilterCount > 0 ? '(Filtered)' : '(All)'}</button>
@@ -12605,7 +13030,9 @@ function _showBracketTable() {
             // Alignment badges
             'ALL-3 LOCK': 'STRONGEST SIGNAL: Mode A (conviction), Mode B (tape score), and V2 (statistical) all picked the same winner independently. No Vegas required. Historically highest reliability.',
             'A+B AGREE': 'Mode A (conviction engine) and Mode B (tape score) both independently picked this winner — but V2 (statistical model) picks the OPPONENT. This is a V4-only signal. V2 disagrees. Proceed with awareness of the V2 position.',
-    'TRIPLE LOCK':    'V4 Gematria, V2 Statistical Model, AND Vegas all predict the same winner.\n\nHighest confidence signal — all three independent systems agree.',
+    'QUAD LOCK':      '⚡ QUAD LOCK — The rarest signal in the system.\n\nAll 4 independent systems pick the same winner:\n  • V4 Mode A (conviction cipher engine)\n  • V4 Mode B (tape VW scorer)\n  • V2 Statistical Model\n  • Vegas spread direction\n\nZero dissent. Maximum confidence.',
+    'TRIPLE LOCK':    'V4 Gematria, V2 Statistical Model, AND Vegas all predict the same winner.\n\nAll three independent systems agree.',
+    'ALL-3 LOCK':     'Both V4 prediction modes AND V2 Statistical Model agree.\n\nVegas may differ — potential value play against the market.',
             'UPSET ALERT':    'V4 Gematria + V2 Statistical Model BOTH predict the opposite of what Vegas favors.\n\nHigh payout opportunity — our models believe Vegas is wrong here.',
             'V2+V4 AGREE':    'Both the V4 Gematria calendar engine and the V2 Statistical model predict the same winner, and this aligns with Vegas.\n\nSolid signal, lower upset upside.',
             'V4 DISSENT':     'V4 Modes A and B both agree on the underdog — but V2 has very high conviction (≥85% WP) for the opponent. V4 is flagging a vibrational anomaly. Exercise caution: V2 has the stronger evidence here.',
@@ -14097,14 +14524,23 @@ function _showBracketTable() {
             gameWPs.forEach((gameData, gameId) => {
                 if (!gameData.data) return;
                 // Only include games from the currently active sport tab
-                if (gameData.sport && gameData.sport !== currentSport) return;
-                const isComplete = gameData.data.isLive===false && gameData.data.startTime && new Date(gameData.data.startTime) < new Date();
-                const isPregame  = !gameData.data.isLive && !isComplete;
-                if (!isPregame || !gameData.data.startTime) return;
+                // Strict check: also skip entries with missing/undefined sport tag
+                if (!gameData.sport || gameData.sport !== currentSport) return;
+                // Show pregame AND live games — drop only completed/final games
+                const gameStart = gameData.data.startTime
+                    ? new Date(gameData.data.startTime)
+                    : (gameData.data.isLive ? new Date() : null); // live games use now as fallback
+                const isFinal   = gameData.data.isFinal === true ||
+                                  (gameData.data.statusText && /final|completed|end/i.test(gameData.data.statusText));
+                if (isFinal) return;
+                if (!gameStart) return;
 
                 const homeTeam = gameData.data.homeTeam;
                 const awayTeam = gameData.data.awayTeam;
-                const gameTime = new Date(gameData.data.startTime);
+                // For live games startTime may be null — use current time so VW calc works
+                const gameTime = gameData.data.startTime
+                    ? new Date(gameData.data.startTime)
+                    : new Date();
                 if (isNaN(gameTime.getTime())) return;
 
                 try {
@@ -14113,12 +14549,25 @@ function _showBracketTable() {
                     const awayTS = scoreSidebarTeam(awayTeam, allVW);
 
                     // V4 conviction (gematria calendar engine)
-                    const v4pred = predictGameWinner(homeTeam, awayTeam, gameTime);
+                    // Normalize team names through TEAM_DATABASE first — this ensures ESPN's
+                    // "Saint Louis Billikens" and a user typing "St. Louis Billikens" both
+                    // resolve to the same canonical name and produce the same cipher values.
+                    const _homeVars = generateTeamVariations(homeTeam);
+                    const _awayVars = generateTeamVariations(awayTeam);
+                    const _homeCanon = _homeVars.full || homeTeam;
+                    const _awayCanon = _awayVars.full || awayTeam;
+                    const v4pred = predictGameWinner(_homeCanon, _awayCanon, gameTime);
 
-                    // V4 Tape winner = higher weighted VW score
                     // ── Raw Mode A (conviction) and Mode B (tape score) ──
-                    const modeAWinner = v4pred.winner;
-                    const modeAConv   = v4pred.winnerConviction ? v4pred.winnerConviction.percentage : 0;
+                    // Order-independence fix: run both directions — Mode A only counts as
+                    // genuine if both orderings agree on the same winner.
+                    let v4predRev = null;
+                    try { v4predRev = predictGameWinner(_awayCanon, _homeCanon, gameTime); } catch(e) {}
+                    const _fwdWin = v4pred ? v4pred.winner : null;
+                    const _revWin = v4predRev ? v4predRev.winner : null;
+                    const modeAConsistent = _fwdWin && _revWin && _fwdWin === _revWin;
+                    const modeAWinner = modeAConsistent ? _fwdWin : null;
+                    const modeAConv   = (modeAConsistent && v4pred.winnerConviction) ? v4pred.winnerConviction.percentage : 0;
                     const modeBWinner = homeTS.total >= awayTS.total ? homeTeam : awayTeam;
                     const margin      = Math.abs(homeTS.total - awayTS.total);
 
@@ -14132,8 +14581,13 @@ function _showBracketTable() {
                     //   Rule 4: Conv 96-100% → lean B (33% > 29% at extreme conviction)
                     // V2 alignment: when V2 matches one mode, boost that mode's confidence
                     let mergedWinner, mergedRule, mergedRuleTag;
-                    const modesAgree = modeAWinner === modeBWinner;
-                    if (modesAgree) {
+                    const modesAgree = modeAWinner !== null && modeAWinner === modeBWinner;
+                    if (!modeAWinner) {
+                        // Mode A inconsistent (flips on order reversal) → use Mode B, flag dissent
+                        mergedWinner  = modeBWinner;
+                        mergedRule    = 'R_INCONSISTENT';
+                        mergedRuleTag = '〰️ A inconsistent→B';
+                    } else if (modesAgree) {
                         mergedWinner  = modeAWinner;
                         mergedRule    = 'AGREE';
                         mergedRuleTag = null; // no special tag needed when they agree
@@ -14191,10 +14645,12 @@ function _showBracketTable() {
                     const upsetAlert = (v4v2agree === true) && (vegasFav !== null) && (v4VegasAgree === false);
 
                     // Blended confidence: boosted by agreement levels
+                    const sidebarQuadLock = allThreeLock && tripleAlign; // all 4 agree
                     let blendedPct = tapeConfPct;
-                    if (allThreeLock) blendedPct = Math.min(99, blendedPct + 15); // A+B+V2 all agree = strongest
-                    else if (tripleAlign) blendedPct = Math.min(99, blendedPct + 12);
-                    else if (modesAgree && !v4v2agree) blendedPct = Math.min(97, blendedPct + 8); // A+B agree, V2 differs
+                    if (sidebarQuadLock) blendedPct = Math.min(99, blendedPct + 25); // ALL 4 agree = highest
+                    else if (allThreeLock) blendedPct = Math.min(99, blendedPct + 15); // A+B+V2
+                    else if (tripleAlign) blendedPct = Math.min(99, blendedPct + 12);  // V4+V2+Vegas
+                    else if (modesAgree && !v4v2agree) blendedPct = Math.min(97, blendedPct + 8);
                     else if (v4v2agree) blendedPct = Math.min(97, blendedPct + 6);
                     else if (v4v2agree === false) blendedPct = Math.max(45, blendedPct - 8);
 
@@ -14275,6 +14731,7 @@ function _showBracketTable() {
 
                     predictions.push({
                         homeTeam, awayTeam, gameTime,
+                        isLive: gameData.data && gameData.data.isLive === true,
                         tapeWinner, tapeLosing, winnerTS, loserTS,
                         homeTS, awayTS, margin, tapeConf,
                         tapeConfPct: blendedPct,
@@ -14283,9 +14740,9 @@ function _showBracketTable() {
                         allThreeLock, modesAgree,
                         mergedRule, mergedRuleTag,
                         modeAWinner, modeBWinner, modeAConv,
-                        v4label: v4pred.winnerConviction.label,
-                        v4pct:   v4pred.winnerConviction.percentage,
-                        v4winner: v4pred.winner,
+                        v4label: v4pred && v4pred.winnerConviction ? v4pred.winnerConviction.label : 'N/A',
+                        v4pct:   v4pred && v4pred.winnerConviction ? v4pred.winnerConviction.percentage : 0,
+                        v4winner: v4pred ? v4pred.winner : null,
                         v2wp,
                         trapFlag, gateA, gateB, trapA, trapB,
                         v4Total, v2Total, vegasTotal, ouAdjustPts,
@@ -14294,6 +14751,19 @@ function _showBracketTable() {
                         v2Spread: v2SpreadStored,
                         vegasSpread: vegasSpreadStored
                     });
+
+                    // ── Write lock flags back onto gameWPs so generateDailyParlay can read them ──
+                    const _gwEntry = gameWPs.get(gameId);
+                    if (_gwEntry) {
+                        _gwEntry._allThreeLock = allThreeLock;
+                        _gwEntry._tripleAlign  = tripleAlign;
+                        _gwEntry._tapeWinner   = tapeWinner;
+                        _gwEntry._tapeLosing   = tapeLosing;
+                        _gwEntry._blendedPct   = blendedPct;
+                        _gwEntry._suppCals     = winnerTS.topCals || [];
+                        _gwEntry._tapeMargin   = margin;
+                        _gwEntry._trapFlag     = trapFlag;
+                    }
                 } catch(e) {
                     console.error('Sidebar error:', homeTeam, 'vs', awayTeam, e);
                 }
@@ -14329,6 +14799,10 @@ function _showBracketTable() {
                     p.gameTime.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
                 let timeStr = '';
                 try { timeStr = p.gameTime.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); } catch(e){}
+                const isLiveGame = p.isLive === true;
+                const timeDisplay = isLiveGame
+                    ? '<span style="background:#ef444422;color:#ef4444;font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;border:1px solid #ef444455;">🔴 LIVE</span>'
+                    : timeStr;
 
                 // Day separator
                 let daySep = '';
@@ -14382,22 +14856,23 @@ function _showBracketTable() {
                     return '<span class="chronos-tip" data-tip="' + tipText + '" style="font-size:10px;font-weight:800;color:' + textColor + ';background:' + bg + ';border:1px solid ' + border + ';border-radius:4px;padding:2px 7px;cursor:help;">' + emoji + ' ' + label + '</span>';
                 }
                 // Badge hierarchy (highest confidence first):
-                // 1. ALL-3 LOCK: A + B + V2 all agree (no Vegas needed) — strongest possible
-                // 2. TRIPLE LOCK: merged V4 + V2 + Vegas agree
-                // 3. UPSET ALERT: merged V4 + V2 agree, oppose Vegas
+                // 0. QUAD LOCK: A + B + V2 + Vegas ALL agree — rarest, highest confidence
+                // 1. ALL-3 LOCK: A + B + V2 agree (Vegas differs/absent)
+                // 2. TRIPLE LOCK: merged V4 + V2 + Vegas agree (modes may split)
+                // 3. UPSET ALERT: V4 + V2 agree, oppose Vegas
                 // 4. V2+V4 AGREE: merged V4 and V2 agree (no Vegas line)
                 // 5. A+B AGREE (V2 differs): both modes agree but V2 disagrees
                 // 6. V2+V4 SPLIT: merged V4 and V2 pick different teams
                 // 7. V4 only: no V2 data
-                if (p.allThreeLock && p.tripleAlign) {
-                    // All 4 agree: V4 Mode A, V4 Mode B, V2, AND Vegas
-                    alignBadges = sideBadge('🔒','ALL-3 LOCK','ALL-3 LOCK','#fff','#0d2010','#10b98188') +
-                        ' ' + sideBadge('🔐','TRIPLE LOCK','TRIPLE LOCK','#10b981','#0d2010','#10b98155');
+                const quadLockFires = p.allThreeLock && p.tripleAlign;
+                if (quadLockFires) {
+                    // QUAD LOCK: Mode A + Mode B + V2 + Vegas ALL agree — all 4 systems
+                    alignBadges = sideBadge('⚡','QUAD LOCK','QUAD LOCK','#f59e0b','#1a0d00','#f59e0b88');
                 } else if (p.allThreeLock) {
-                    // V4 A + V4 B + V2 agree — Vegas differs or absent
+                    // ALL-3 LOCK: V4 A + V4 B + V2 agree — Vegas differs or absent
                     alignBadges = sideBadge('🔒','ALL-3 LOCK','ALL-3 LOCK','#fff','#0d2010','#10b98188');
                 } else if (p.tripleAlign) {
-                    // Merged V4 + V2 + Vegas agree (modes may differ internally)
+                    // TRIPLE LOCK: Merged V4 + V2 + Vegas agree (modes may differ internally)
                     alignBadges = sideBadge('🔐','TRIPLE LOCK','TRIPLE LOCK','#10b981','#0d2010','#10b98155');
                 } else if (p.upsetAlert) {
                     alignBadges = sideBadge('⚡','UPSET ALERT','UPSET ALERT','#f59e0b','#1a1000','#f59e0b55');
@@ -14516,9 +14991,9 @@ function _showBracketTable() {
                 }
 
                 return daySep +
-                    '<div style="border-bottom:1px solid #1a2030;padding:10px 0;">' +
+                    '<div data-teams="' + p.homeTeam.toLowerCase() + ' ' + p.awayTeam.toLowerCase() + '" style="border-bottom:1px solid #1a2030;padding:10px 0;">' +
                     // Game time — VISIBLE color
-                    '<div style="font-size:11px;color:#8b92a7;margin-bottom:5px;font-weight:600;">' + timeStr + '</div>' +
+                    '<div style="font-size:11px;color:#8b92a7;margin-bottom:5px;font-weight:600;">' + timeDisplay + '</div>' +
                     // Winner + confidence
                     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px;">' +
                         '<div style="flex:1;min-width:0;">' +
@@ -14555,9 +15030,35 @@ function _showBracketTable() {
                 : '⚡ Tape Predictions';
             return '<div style="background:#1a1f2e;border:1px solid #2a3142;border-radius:8px;padding:16px;">' +
                 '<h3 style="color:#fff;margin:0 0 3px 0;font-size:15px;">' + sidebarTitle + '</h3>' +
-                '<p style="color:#4a5568;font-size:10px;margin:0 0 10px 0;">' + predictions.length + ' games · sorted by start time · 🔗=V4 aligned</p>' +
-                '<div id="chronos-sidebar" style="max-height:calc(100vh - 180px);overflow-y:auto;padding-right:4px;">' + cards + '</div>' +
+                '<p style="color:#4a5568;font-size:10px;margin:0 0 8px 0;">' + predictions.length + ' games · sorted by start time · 🔗=V4 aligned</p>' +
+                '<div style="position:relative;margin-bottom:8px;">' +
+                  '<input id="sidebar-search" type="text" placeholder="Search team..." oninput="sidebarSearch(this.value)" ' +
+                    'style="width:100%;box-sizing:border-box;padding:6px 10px 6px 28px;background:#1a2535;border:1px solid #3b82f655;border-radius:5px;color:#e8e8e8;font-size:11px;outline:none;">' +
+                  '<span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:11px;pointer-events:none;color:#8b92a7;">🔍</span>' +
+                '</div>' +
+                '<div id="chronos-sidebar" style="max-height:calc(100vh - 210px);overflow-y:auto;padding-right:4px;">' + cards + '</div>' +
                 '</div>';
+        }
+
+        // ── Sidebar team search — highlights and scrolls to matching game ──
+        function sidebarSearch(query) {
+            const sidebar = document.getElementById('chronos-sidebar');
+            if (!sidebar) return;
+            const cards = sidebar.querySelectorAll('[data-teams]');
+            const q = query.toLowerCase().trim();
+            if (!q) {
+                cards.forEach(c => { c.style.opacity='1'; c.style.outline='none'; });
+                return;
+            }
+            let firstMatch = null;
+            cards.forEach(card => {
+                const teams = (card.getAttribute('data-teams') || '').toLowerCase();
+                const matches = teams.includes(q);
+                card.style.opacity = matches ? '1' : '0.25';
+                card.style.outline = matches ? '1px solid #3b82f6' : 'none';
+                if (matches && !firstMatch) firstMatch = card;
+            });
+            if (firstMatch) firstMatch.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         // ── Render sidebar without destroying it if scroll position is active ──
@@ -14841,6 +15342,8 @@ function _showBracketTable() {
             const data = {
                 id: game.id,
                 isLive: isLive,
+                isFinal: status.type.completed === true || (status.type.name && /final/i.test(status.type.name)),
+                statusText: status.type.shortDetail || status.type.name || '',
                 homeTeam: home.team.displayName,
                 awayTeam: away.team.displayName,
                 homeTeamId: home.team.id,  // For intelligence API calls
@@ -18211,6 +18714,78 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                         html += '</div>';
                     });
                     html += '</div></div>';
+                }
+
+                // ── LIVE BETTING SIGNAL PANEL ──
+                // Fires when VM match rate ≥50% with 10+ plays — gives actionable bet type
+                {
+                    const h = g.stats.home, a = g.stats.away;
+                    const totalPlays   = h.total + a.total;
+                    const totalMatching = h.matching + a.matching;
+                    const overallRate  = totalPlays >= 10 ? Math.round(totalMatching / totalPlays * 100) : 0;
+                    const homeRate     = h.total > 0 ? Math.round(h.matching / h.total * 100) : 0;
+                    const awayRate     = a.total > 0 ? Math.round(a.matching / a.total * 100) : 0;
+                    const isLiveGame   = g.plays.length > 0 && g.plays.some(function(p){ return p.elapsed > 0; });
+
+                    if (isLiveGame && totalPlays >= 10) {
+                        var signal = null, sigColor = '#4a5568', sigBg = '#0a0e15', sigBorder = '#1a2535';
+
+                        // Determine signal type
+                        if (overallRate >= 55) {
+                            // Both teams active = flowing game = OVER lean
+                            const balanced = homeRate >= 40 && awayRate >= 40;
+                            const oneSided = (homeRate >= 60 && awayRate < 35) || (awayRate >= 60 && homeRate < 35);
+                            const dominantTeam = homeRate >= 60 ? homeTeam : awayRate >= 60 ? awayTeam : null;
+
+                            if (oneSided && dominantTeam) {
+                                signal = { type:'ML', icon:'⚡', label: 'LIVE ML SIGNAL',
+                                    desc: dominantTeam.split(' ').pop() + ' in dominant rhythm',
+                                    detail: 'One-sided VM dominance (' + (homeRate >= 60 ? homeRate : awayRate) + '%) → lean ' + dominantTeam.split(' ').pop() + ' ML live',
+                                    confidence: overallRate >= 65 ? 'HIGH' : 'MODERATE' };
+                                sigColor='#a78bfa'; sigBg='#0d0a1f'; sigBorder='#a78bfa55';
+                            } else if (balanced) {
+                                signal = { type:'OVER', icon:'🔥', label: 'LIVE OVER SIGNAL',
+                                    desc: 'Both teams in rhythm — scoring flows freely',
+                                    detail: 'Home ' + homeRate + '% / Away ' + awayRate + '% VM match → high-scoring pace → lean OVER live total',
+                                    confidence: overallRate >= 65 ? 'HIGH' : 'MODERATE' };
+                                sigColor='#10b981'; sigBg='#0a1f12'; sigBorder='#10b98155';
+                            } else {
+                                signal = { type:'WATCH', icon:'👁', label: 'ELEVATED RHYTHM',
+                                    desc: totalMatching + '/' + totalPlays + ' plays in rhythm (' + overallRate + '%)',
+                                    detail: 'Above threshold but signal not yet directional. Monitor for imbalance.',
+                                    confidence: 'LOW' };
+                                sigColor='#f59e0b'; sigBg='#1a0f00'; sigBorder='#f59e0b44';
+                            }
+                        } else if (overallRate >= 40 && overallRate < 50) {
+                            signal = { type:'NEUTRAL', icon:'〰️', label: 'BUILDING RHYTHM',
+                                desc: overallRate + '% VM match rate — approaching threshold',
+                                detail: 'Not yet actionable. Signal fires at ≥50% with 10+ plays.',
+                                confidence: 'WATCH' };
+                            sigColor='#4a5568'; sigBg='#0a0e15'; sigBorder='#2a3142';
+                        }
+
+                        if (signal) {
+                            html += '<div style="background:' + sigBg + ';border:2px solid ' + sigBorder + ';border-radius:8px;padding:14px;margin-bottom:12px;">';
+                            html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
+                            html += '<div style="display:flex;align-items:center;gap:6px;">';
+                            html += '<span style="font-size:16px;">' + signal.icon + '</span>';
+                            html += '<span style="font-size:12px;font-weight:800;color:' + sigColor + ';">' + signal.label + '</span>';
+                            html += '<span style="background:' + sigBg + ';border:1px solid ' + sigBorder + ';color:' + sigColor + ';font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;">' + signal.type + '</span>';
+                            html += '</div>';
+                            html += '<span style="font-size:10px;color:' + sigColor + ';font-weight:700;">' + signal.confidence + ' CONF</span>';
+                            html += '</div>';
+                            html += '<div style="font-size:12px;color:#fff;font-weight:700;margin-bottom:3px;">' + signal.desc + '</div>';
+                            html += '<div style="font-size:10px;color:#8b92a7;line-height:1.5;">' + signal.detail + '</div>';
+                            // VM stats bar
+                            html += '<div style="display:flex;gap:12px;margin-top:8px;padding-top:8px;border-top:1px solid ' + sigBorder + ';">';
+                            html += '<div style="text-align:center;"><div style="font-size:16px;font-weight:900;color:' + (overallRate>=55?'#10b981':overallRate>=45?'#f59e0b':'#ef4444') + ';">' + overallRate + '%</div><div style="font-size:9px;color:#4a5568;">Overall VM</div></div>';
+                            html += '<div style="text-align:center;"><div style="font-size:14px;font-weight:800;color:#3b82f6;">' + homeRate + '%</div><div style="font-size:9px;color:#4a5568;">Home</div></div>';
+                            html += '<div style="text-align:center;"><div style="font-size:14px;font-weight:800;color:#ef4444;">' + awayRate + '%</div><div style="font-size:9px;color:#4a5568;">Away</div></div>';
+                            html += '<div style="text-align:center;"><div style="font-size:14px;font-weight:800;color:#8b92a7;">' + totalPlays + '</div><div style="font-size:9px;color:#4a5568;">Plays</div></div>';
+                            html += '</div>';
+                            html += '</div>';
+                        }
+                    }
                 }
 
                 // ── Energy Wave ──
