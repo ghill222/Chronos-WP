@@ -9464,7 +9464,6 @@ function _showBracketTable() {
 
         // ── Kalshi public market fetch — no auth required ──
         window.fetchKalshiMarkets = async function(sport) {
-            // Helper: fetch with timeout + proxy fallback
             async function kalshiFetch(path) {
                 const direct = KALSHI_PUBLIC_BASE + path;
                 const proxy  = 'https://corsproxy.io/?' + encodeURIComponent(direct);
@@ -9479,94 +9478,67 @@ function _showBracketTable() {
                         if (!r.ok) return null;
                         const text = await r.text();
                         const json = JSON.parse(text);
-                        // allorigins wraps in {contents:'...'}
-                        return json.events || (json.contents ? JSON.parse(json.contents).events : null) || json;
+                        return json.events || (json.contents ? JSON.parse(json.contents).events : null) || null;
                     } catch(e) { clearTimeout(t); return null; }
                 }
-
-                return await tryUrl(direct, 5000)
-                    || await tryUrl(proxy,  9000)
-                    || await tryUrl(proxy2, 9000)
-                    || null;
+                return await tryUrl(direct, 5000) || await tryUrl(proxy, 9000) || await tryUrl(proxy2, 9000) || null;
             }
 
-            // ── Kalshi series ticker patterns by sport ──
-            // These target specific sports categories at the API level so we don't
-            // wade through 200 AI/politics markets
-            const SPORT_SERIES = {
-                tennis: [
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPMIAMI',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISWTAMIAMI',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPMONTECARLO',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPMADRID',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPROME',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPWIMBLEDON',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPUSOPEN',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATPAUSTRALIANOPEN',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISATP',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXTENNISWTA'
-                ],
-                mma: [
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXUFC',
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXMMA'
-                ],
-                nba: [
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXNBA'
-                ],
-                nhl: [
-                    '/events?with_nested_markets=true&status=open&limit=200&series_ticker=KXNHL'
-                ]
+            // Fetch all open events — we filter client-side
+            const nowSec     = Math.floor(Date.now() / 1000);
+            const in48hrsSec = nowSec + (48 * 3600);
+
+            // Sport-specific detection logic
+            // Tennis & MMA: match title contains " vs " (head-to-head player format)
+            // NBA/NHL: team name keywords
+            const SPORT_DETECT = {
+                tennis: function(ev, markets) {
+                    // Kalshi tennis titles: "Royer vs Tirante", "Anisimova vs Tomljanovic"
+                    const title = (ev.title || ev.event_ticker || '').toLowerCase();
+                    const isMatch = / vs /i.test(ev.title || '');
+                    const isTennisSeries = /wta|atp|tennis|miami|madrid|wimbledon|roland|french|australian|indian.wells/i.test(
+                        (ev.title||'') + (ev.sub_title||'') + (ev.series_ticker||'') + (ev.event_ticker||'')
+                    );
+                    return isMatch || isTennisSeries;
+                },
+                mma: function(ev, markets) {
+                    const haystack = ((ev.title||'') + ' ' + (ev.sub_title||'') + ' ' + (ev.series_ticker||'')).toLowerCase();
+                    return /ufc|mma|fight|bout| vs /i.test(ev.title||'') && /fight|ufc|mma/i.test(haystack);
+                },
+                nba: function(ev, markets) {
+                    const haystack = ((ev.title||'') + ' ' + (ev.series_ticker||'')).toLowerCase();
+                    return /nba|lakers|celtics|warriors|knicks|nets|heat|bulls|nuggets|suns|bucks|sixers|clippers|thunder|rockets|mavs|pistons|jazz|grizzlies|pelicans|raptors|magic|wizards|hawks|hornets|pacers|cavaliers|blazers|kings|wolves|spurs|trailblazers/i.test(haystack);
+                },
+                nhl: function(ev, markets) {
+                    const haystack = ((ev.title||'') + ' ' + (ev.series_ticker||'')).toLowerCase();
+                    return /nhl|hockey|bruins|rangers|leafs|maple leafs|canadiens|penguins|capitals|avalanche|lightning|oilers|flames|jets|ducks|kings|sharks|canucks|wild|stars|blues|sabres|flyers|devils|islanders|senators|panthers|predators|hurricanes|kraken|golden knights/i.test(haystack);
+                }
             };
 
-            // Keywords to identify relevant events when series_ticker filter misses
-            const SPORT_KEYWORDS = {
-                tennis: ['tennis','atp','wta','miami open','madrid open','roland garros','wimbledon','us open','australian open','monte carlo','indian wells'],
-                mma:    ['ufc','mma','fight','bout','vs.','fighter'],
-                nba:    ['nba','basketball','lakers','celtics','warriors','knicks','nets','heat','bulls','nuggets','suns','bucks','sixers','clippers'],
-                nhl:    ['nhl','hockey','stanley cup','bruins','rangers','leafs','canadiens','penguins','capitals','avalanche','lightning','oilers']
-            };
+            const detector = SPORT_DETECT[sport] || function(){ return false; };
 
-            const series = SPORT_SERIES[sport] || [];
-            const keywords = SPORT_KEYWORDS[sport] || [];
+            const allEvents = await kalshiFetch('/events?with_nested_markets=true&status=open&limit=200');
+            if (!allEvents) return null;
+
             const collected = [];
-            const seenIds = new Set();
+            allEvents.forEach(function(ev) {
+                const markets = ev.markets || [];
 
-            // Try targeted series fetches first
-            for (const path of series) {
-                const events = await kalshiFetch(path);
-                if (events && Array.isArray(events)) {
-                    events.forEach(function(ev) {
-                        if (!seenIds.has(ev.event_ticker)) {
-                            seenIds.add(ev.event_ticker);
-                            collected.push(ev);
-                        }
-                    });
-                    if (collected.length > 0) break; // got matches — no need to try all series
+                // Only keep markets closing within 48 hours (eliminates 2030+ futures)
+                const nearMarkets = markets.filter(function(m) {
+                    if (!m.close_time) return false;
+                    const closeTs = Math.floor(new Date(m.close_time).getTime() / 1000);
+                    return closeTs >= nowSec && closeTs <= in48hrsSec;
+                });
+                if (!nearMarkets.length) return;
+
+                if (detector(ev, nearMarkets)) {
+                    collected.push(Object.assign({}, ev, { markets: nearMarkets }));
                 }
-            }
+            });
 
-            // If series fetches found nothing, fall back to full fetch + keyword filter
-            if (collected.length === 0) {
-                const allEvents = await kalshiFetch('/events?with_nested_markets=true&status=open&limit=200');
-                if (allEvents && Array.isArray(allEvents)) {
-                    allEvents.forEach(function(ev) {
-                        const haystack = [
-                            ev.title||'', ev.sub_title||'', ev.series_ticker||'',
-                            ev.event_ticker||'', ev.category||''
-                        ].join(' ').toLowerCase();
-                        const isMatch = keywords.some(function(k){ return haystack.includes(k); });
-                        // Also accept if category is Sports
-                        const isSports = (ev.category||'').toLowerCase().includes('sport');
-                        if ((isMatch || isSports) && !seenIds.has(ev.event_ticker)) {
-                            seenIds.add(ev.event_ticker);
-                            collected.push(ev);
-                        }
-                    });
-                }
-            }
-
-            console.log('Kalshi ' + sport + ': ' + collected.length + ' events found');
-            return collected.length > 0 ? collected : null;
+            console.log('Kalshi ' + sport + ': ' + collected.length + ' events (next 48hr)');
+            return collected;
         };
 
         // ── Parse Kalshi market into usable format ──
@@ -9593,53 +9565,96 @@ function _showBracketTable() {
             if (!el) return;
             el.innerHTML = '<div style="color:#8b92a7;font-size:12px;padding:12px;text-align:center;">⏳ Fetching Kalshi markets...</div>';
 
-            const events = await fetchKalshiMarkets('Sports');
+            const events = await fetchKalshiMarkets(sport);
 
             if (events === null) {
-                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">' +
-                    '⚠️ Could not reach Kalshi markets. Check your connection or try refreshing.</div>';
+                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">⚠️ Could not reach Kalshi. Check connection or try refreshing.</div>';
                 return;
             }
             if (!events || events.length === 0) {
-                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px;text-align:center;">No open ' + sport.toUpperCase() + ' markets found on Kalshi right now.<br><span style="font-size:10px;color:#2a3142;">Markets open closer to event time — check back as matches approach.</span></div>';
+                el.innerHTML = '<div style="color:#4a5568;font-size:11px;padding:10px 0;text-align:center;">' +
+                    'No ' + sport.toUpperCase() + ' match markets open in the next 48 hours.<br>' +
+                    '<span style="font-size:10px;color:#2a3142;">Match-winner markets appear 1-2 hours before start time.</span></div>';
                 return;
             }
 
-            // Events are already filtered by sport from fetchKalshiMarkets
-            const relevant = events.filter(function(ev) {
-                return ev.markets && ev.markets.length > 0;
-            });
-
             let html = '';
-            relevant.forEach(function(ev) {
+            events.forEach(function(ev) {
                 const markets = ev.markets || [];
                 if (!markets.length) return;
 
-                html += '<div style="border:1px solid #1a2535;border-radius:6px;padding:10px 12px;margin-bottom:8px;background:#080c12;">';
-                html += '<div style="font-size:11px;font-weight:800;color:#a78bfa;margin-bottom:6px;">' + (ev.title||ev.event_ticker) + '</div>';
+                const evTitle = ev.title || ev.event_ticker || '';
+                // Parse "PlayerA vs PlayerB" format
+                const vsParts = evTitle.split(/ vs\.? /i);
+                const playerA = vsParts[0] ? vsParts[0].trim() : evTitle;
+                const playerB = vsParts[1] ? vsParts[1].trim() : '';
 
-                markets.slice(0,4).forEach(function(mkt) {
-                    const m = parseKalshiMarket(mkt);
-                    if (!m.yesPct && !m.noPct) return;
-                    const confCol = m.yesPct >= 65 ? '#10b981' : m.yesPct >= 50 ? '#3b82f6' : '#f59e0b';
-                    const barW = Math.max(5, Math.min(95, m.yesPct));
+                // Get win probabilities from nested markets
+                // Kalshi: market[0] = playerA wins, market[1] = playerB wins
+                var aWinPct = 50, bWinPct = 50;
+                if (markets.length >= 2) {
+                    var pA = parseFloat(markets[0].yes_bid_dollars || markets[0].yes_ask_dollars || '0.5');
+                    var pB = parseFloat(markets[1].yes_bid_dollars || markets[1].yes_ask_dollars || '0.5');
+                    aWinPct = Math.round(pA * 100);
+                    bWinPct = Math.round(pB * 100);
+                } else {
+                    var pYes = parseFloat(markets[0].yes_bid_dollars || markets[0].yes_ask_dollars || '0.5');
+                    aWinPct = Math.round(pYes * 100);
+                    bWinPct = 100 - aWinPct;
+                }
 
-                    html += '<div style="margin-bottom:6px;">';
-                    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">';
-                    html += '<span style="font-size:11px;color:#e8e8e8;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + m.title + '">' + m.title + '</span>';
-                    html += '<span style="font-size:12px;font-weight:800;color:' + confCol + ';margin-left:8px;white-space:nowrap;">' + m.yesPct + '% YES</span>';
-                    html += '</div>';
-                    // Probability bar
-                    html += '<div style="height:4px;background:#1a2535;border-radius:2px;overflow:hidden;">';
-                    html += '<div style="height:100%;width:' + barW + '%;background:' + confCol + ';border-radius:2px;transition:width 0.3s;"></div>';
-                    html += '</div>';
-                    html += '</div>';
-                });
+                var aFav = aWinPct >= bWinPct;
+                var aCol = aFav ? '#10b981' : '#4a5568';
+                var bCol = !aFav ? '#10b981' : '#4a5568';
+                var isLive = markets.some(function(m){ return m.status === 'active'; });
 
+                var timeLabel = '';
+                if (markets[0] && markets[0].close_time) {
+                    var ct = new Date(markets[0].close_time);
+                    timeLabel = ct.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+                }
+
+                var safeA = playerA.replace(/\'/g,"\\'");
+                var safeB = playerB.replace(/\'/g,"\\'");
+
+                html += '<div style="background:#0a0e15;border:1px solid ' + (isLive?'#ef444433':'#1a2535') + ';border-radius:6px;padding:10px 12px;margin-bottom:8px;">';
+                // Header row
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+                html += '<span style="font-size:10px;font-weight:700;color:' + (isLive?'#ef4444':'#4a5568') + ';">' + (isLive?'🔴 LIVE':'⏰ ' + timeLabel) + '</span>';
+                if (playerB) {
+                    html += '<button onclick="fillTapeFromESPN(\'' + safeA + '\',\'' + safeB + '\')" ' +
+                        'style="font-size:9px;color:#a78bfa;background:#667eea11;border:1px solid #667eea33;border-radius:3px;padding:2px 7px;cursor:pointer;" ' +
+                        'title="Load into Tale of the Tape calculator">⚖️ Analyze</button>';
+                }
                 html += '</div>';
+
+                // Player vs Player grid
+                html += '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;">';
+
+                // Player A
+                html += '<div style="background:' + (aFav?'#0a1f14':'#0a0e15') + ';border:1px solid ' + aCol + '44;border-radius:5px;padding:8px;text-align:center;">';
+                html += '<div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-bottom:4px;word-break:break-word;">' + playerA + '</div>';
+                html += '<div style="font-size:20px;font-weight:900;color:' + aCol + ';">' + aWinPct + '%</div>';
+                if (aFav) html += '<div style="font-size:9px;color:#10b981;font-weight:700;">FAV</div>';
+                html += '</div>';
+
+                html += '<div style="text-align:center;color:#2a3142;font-size:11px;font-weight:700;">VS</div>';
+
+                // Player B
+                if (playerB) {
+                    html += '<div style="background:' + (!aFav?'#0a1f14':'#0a0e15') + ';border:1px solid ' + bCol + '44;border-radius:5px;padding:8px;text-align:center;">';
+                    html += '<div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-bottom:4px;word-break:break-word;">' + playerB + '</div>';
+                    html += '<div style="font-size:20px;font-weight:900;color:' + bCol + ';">' + bWinPct + '%</div>';
+                    if (!aFav) html += '<div style="font-size:9px;color:#10b981;font-weight:700;">FAV</div>';
+                    html += '</div>';
+                } else {
+                    html += '<div></div>';
+                }
+
+                html += '</div></div>'; // end grid + card
             });
 
-            el.innerHTML = html || '<div style="color:#4a5568;font-size:11px;padding:10px;">No market data available.</div>';
+            el.innerHTML = html || '<div style="color:#4a5568;font-size:11px;padding:10px;">No market data parsed.</div>';
         };
 
         // ── Attach Kalshi odds to gameWPs for matchup board ──
