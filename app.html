@@ -4929,6 +4929,14 @@ function lookupTeam(teamName) {
                 this.cleanupOldGames();
                 this.migrateV1toV2(); // Fix stuck games + upgrade V1 to V2
                 this.fixPregameFallbacks(); // Fix pregame games with bad/missing Vegas data
+                // Fix null wpError/spreadError/totalError caused by NaN→null JSON round-trip
+                // NaN stored via JSON.stringify becomes null when parsed back — safe to replace with 0
+                // Does NOT call saveToStorage — memory-only fix, localStorage untouched
+                this.results.forEach(function(g) {
+                    if (g.wpError     === null || g.wpError     !== g.wpError) g.wpError     = 0;
+                    if (g.spreadError === null || g.spreadError !== g.spreadError) g.spreadError = 0;
+                    if (g.totalError  === null || g.totalError  !== g.totalError) g.totalError  = 0;
+                });
                 
                 // Auto-check for completed games on page load
                 setTimeout(() => this.autoCheckCompletedGames(), 2000);
@@ -5709,9 +5717,9 @@ function lookupTeam(teamName) {
                 
                 // Calculate errors
                 const actualHomeWP = prediction.homeWon ? 100 : 0;
-                prediction.wpError = Math.abs(prediction.predictedHomeWP - actualHomeWP);
-                prediction.spreadError = Math.abs(prediction.predictedSpread - prediction.actualSpread);
-                prediction.totalError = Math.abs(prediction.predictedTotal - prediction.actualTotal);
+                prediction.wpError = (prediction.predictedHomeWP != null) ? Math.abs(prediction.predictedHomeWP - actualHomeWP) : null;
+                prediction.spreadError = (prediction.predictedSpread != null) ? Math.abs(prediction.predictedSpread - prediction.actualSpread) : null;
+                prediction.totalError = (prediction.predictedTotal != null) ? Math.abs(prediction.predictedTotal - prediction.actualTotal) : null;
                 
                 // Calculate vs Vegas
                 if (prediction.vegasSpread !== null) {
@@ -5807,9 +5815,9 @@ function lookupTeam(teamName) {
                 
                 console.log(`✅ OUTCOME RECORDED (${source}):`);
                 console.log(`   ${prediction.homeTeam} ${finalHomeScore} - ${prediction.awayTeam} ${finalAwayScore}`);
-                console.log(`   Predicted: ${prediction.predictedHomeWP.toFixed(1)}% WP | Actual: ${prediction.homeWon ? 'Won' : 'Lost'}`);
-                console.log(`   Spread Error: ${prediction.spreadError.toFixed(1)} pts (Beat Vegas: ${prediction.beatVegasSpread ? 'YES' : 'NO'})`);
-                console.log(`   Total Error: ${prediction.totalError.toFixed(1)} pts (Beat Vegas: ${prediction.beatVegasTotal ? 'YES' : 'NO'})`);
+                console.log(`   Predicted: ${prediction.predictedHomeWP != null ? prediction.predictedHomeWP.toFixed(1) : 'N/A'}% WP | Actual: ${prediction.homeWon ? 'Won' : 'Lost'}`);
+                console.log(`   Spread Error: ${prediction.spreadError != null ? prediction.spreadError.toFixed(1) : 'N/A'} pts (Beat Vegas: ${prediction.beatVegasSpread ? 'YES' : 'NO'})`);
+                console.log(`   Total Error: ${prediction.totalError != null ? prediction.totalError.toFixed(1) : 'N/A'} pts (Beat Vegas: ${prediction.beatVegasTotal ? 'YES' : 'NO'})`);
             }
             
             // Generate sport-specific report
@@ -5879,9 +5887,9 @@ function lookupTeam(teamName) {
                     sportName: sportDisplayName,
                     isTapeSport: isTapeSport,
                     gamesTracked: sportGames.length,
-                    avgWPError: avgWPError.toFixed(1),
-                    avgSpreadError: avgSpreadError.toFixed(1),
-                    avgTotalError: avgTotalError.toFixed(1),
+                    avgWPError: (avgWPError != null && !isNaN(avgWPError)) ? avgWPError.toFixed(1) : 'N/A',
+                    avgSpreadError: (avgSpreadError != null && !isNaN(avgSpreadError)) ? avgSpreadError.toFixed(1) : 'N/A',
+                    avgTotalError: (avgTotalError != null && !isNaN(avgTotalError)) ? avgTotalError.toFixed(1) : 'N/A',
                     winLossRecord: winLossRecord,
                     spreadWinRate: gamesWithVegasSpread > 0 ? (beatVegasSpread / gamesWithVegasSpread * 100).toFixed(1) : '0.0',
                     totalWinRate: gamesWithVegasTotal > 0 ? (beatVegasTotal / gamesWithVegasTotal * 100).toFixed(1) : '0.0',
@@ -5932,9 +5940,12 @@ function lookupTeam(teamName) {
                 }
 
                 // Overall metrics
-                const avgWPError = completed.reduce((sum, g) => sum + (g.wpError||0), 0) / completed.length;
-                const avgSpreadError = completed.reduce((sum, g) => sum + g.spreadError, 0) / completed.length;
-                const avgTotalError = completed.reduce((sum, g) => sum + g.totalError, 0) / completed.length;
+                const _wpValid  = completed.filter(g => g.wpError     != null && !isNaN(g.wpError));
+                const _spValid  = completed.filter(g => g.spreadError != null && !isNaN(g.spreadError));
+                const _totValid = completed.filter(g => g.totalError  != null && !isNaN(g.totalError));
+                const avgWPError     = _wpValid.length  > 0 ? _wpValid.reduce((s,g)=>s+g.wpError,0)     / _wpValid.length     : 0;
+                const avgSpreadError = _spValid.length  > 0 ? _spValid.reduce((s,g)=>s+g.spreadError,0) / _spValid.length     : 0;
+                const avgTotalError  = _totValid.length > 0 ? _totValid.reduce((s,g)=>s+g.totalError,0) / _totValid.length    : 0;
                 
                 const beatVegasSpread = completed.filter(g => g.beatVegasSpread === true).length;
                 const beatVegasTotal = completed.filter(g => g.beatVegasTotal === true).length;
@@ -5975,8 +5986,8 @@ function lookupTeam(teamName) {
                 
                 const v1Stats = {
                     gamesTracked: v1Games.length,
-                    avgWPError: v1Games.length > 0 ? (v1Games.reduce((sum, g) => sum + g.wpError, 0) / v1Games.length).toFixed(1) + '%' : 'N/A',
-                    avgSpreadError: v1Games.length > 0 ? (v1Games.reduce((sum, g) => sum + g.spreadError, 0) / v1Games.length).toFixed(1) + ' pts' : 'N/A',
+                    avgWPError: v1Games.length > 0 ? (v1Games.filter(g=>g.wpError!=null&&!isNaN(g.wpError)).reduce((s,g)=>s+g.wpError,0)/Math.max(1,v1Games.filter(g=>g.wpError!=null&&!isNaN(g.wpError)).length)).toFixed(1) + '%' : 'N/A',
+                    avgSpreadError: v1Games.length > 0 ? (v1Games.filter(g=>g.spreadError!=null&&!isNaN(g.spreadError)).reduce((s,g)=>s+g.spreadError,0)/Math.max(1,v1Games.filter(g=>g.spreadError!=null&&!isNaN(g.spreadError)).length)).toFixed(1) + ' pts' : 'N/A',
                     beatVegasSpread: v1Games.filter(g => g.beatVegasSpread === true).length,
                     spreadWinRate: v1Games.length > 0 ? (v1Games.filter(g => g.beatVegasSpread === true).length / v1Games.length * 100).toFixed(1) + '%' : 'N/A',
                     winnerPredictions: v1Games.length > 0 ? (() => {
@@ -5992,8 +6003,8 @@ function lookupTeam(teamName) {
                 
                 const v2Stats = {
                     gamesTracked: v2Games.length,
-                    avgWPError: v2Games.length > 0 ? (v2Games.reduce((sum, g) => sum + g.wpError, 0) / v2Games.length).toFixed(1) + '%' : 'N/A',
-                    avgSpreadError: v2Games.length > 0 ? (v2Games.reduce((sum, g) => sum + g.spreadError, 0) / v2Games.length).toFixed(1) + ' pts' : 'N/A',
+                    avgWPError: v2Games.length > 0 ? (v2Games.filter(g=>g.wpError!=null&&!isNaN(g.wpError)).reduce((s,g)=>s+g.wpError,0)/Math.max(1,v2Games.filter(g=>g.wpError!=null&&!isNaN(g.wpError)).length)).toFixed(1) + '%' : 'N/A',
+                    avgSpreadError: v2Games.length > 0 ? (v2Games.filter(g=>g.spreadError!=null&&!isNaN(g.spreadError)).reduce((s,g)=>s+g.spreadError,0)/Math.max(1,v2Games.filter(g=>g.spreadError!=null&&!isNaN(g.spreadError)).length)).toFixed(1) + ' pts' : 'N/A',
                     beatVegasSpread: v2Games.filter(g => g.beatVegasSpread === true).length,
                     spreadWinRate: v2Games.length > 0 ? (v2Games.filter(g => g.beatVegasSpread === true).length / v2Games.length * 100).toFixed(1) + '%' : 'N/A',
                     winnerPredictions: v2Games.length > 0 ? (() => {
@@ -10948,7 +10959,21 @@ function _showBracketTable() {
                 if(cb && typeof cb==='string' && cb.length>0) document.getElementById('dob-rerun-b').value = cb;
             };
 
-            function buildMatchCard(nameA, nameB, eventLabel, timeStr, state) {
+            function buildMatchCard(nameA, nameB, eventLabel, timeStr, state, meta) {
+                meta = meta || {};
+                // Extract ESPN metadata
+                var recA     = meta.recA || (window._fightMeta && window._fightMeta[nameA] && window._fightMeta[nameA].record) || '';
+                var recB     = meta.recB || (window._fightMeta && window._fightMeta[nameB] && window._fightMeta[nameB].record) || '';
+                var flagA    = meta.flagA || (window._fightMeta && window._fightMeta[nameA] && window._fightMeta[nameA].flag) || '';
+                var flagB    = meta.flagB || (window._fightMeta && window._fightMeta[nameB] && window._fightMeta[nameB].flag) || '';
+                var countryA = meta.countryA || (window._fightMeta && window._fightMeta[nameA] && window._fightMeta[nameA].country) || '';
+                var countryB = meta.countryB || (window._fightMeta && window._fightMeta[nameB] && window._fightMeta[nameB].country) || '';
+                var rankA    = meta.rankA || (window._fightMeta && window._fightMeta[nameA] && window._fightMeta[nameA].rank) || '';
+                var rankB    = meta.rankB || (window._fightMeta && window._fightMeta[nameB] && window._fightMeta[nameB].rank) || '';
+                var resultMethod = meta.resultMethod || '';
+                var matchScore   = meta.score || '';
+                var espnWinner   = meta.winner || '';
+                var weightClass  = eventLabel || meta.timeStr || '';
                 // ── Step 1: Build player objects and VW scores ──
                 var pA = buildTSPlayer(nameA);
                 var pB = buildTSPlayer(nameB);
@@ -11074,8 +11099,13 @@ function _showBracketTable() {
                 c+='<div id="'+cardId+'" style="background:#0f1420;border:1px solid #2a3142;border-radius:8px;padding:14px;margin-bottom:10px;">';
 
                 // Header row
-                c+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">';
-                c+='<span style="color:#8b92a7;font-size:11px;">'+stateLabel+(timeStr?' · '+timeStr:'')+(eventLabel?'<span style="color:#4a5568;"> · '+eventLabel+'</span>':'')+'</span>';
+                c+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:4px;">';
+                c+='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+                c+='<span style="color:#8b92a7;font-size:11px;">'+stateLabel+(timeStr&&timeStr!==eventLabel?' · '+timeStr:'')+'</span>';
+                if(weightClass) c+='<span style="color:#a78bfa;font-size:9px;font-weight:700;background:#a78bfa11;border:1px solid #a78bfa33;border-radius:3px;padding:1px 6px;cursor:help;" title="Weight class / event">'+weightClass+'</span>';
+                if(state==='post'&&resultMethod) c+='<span style="color:#10b981;font-size:9px;font-weight:700;background:#10b98111;border:1px solid #10b98133;border-radius:3px;padding:1px 6px;cursor:help;" title="Result method">'+resultMethod+'</span>';
+                if(state==='in'&&matchScore) c+='<span style="color:#f59e0b;font-size:9px;font-weight:700;cursor:help;" title="Live score">'+matchScore+'</span>';
+                c+='</div>';
                 c+='<span style="background:'+bannerColor+'22;color:'+bannerColor+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:12px;border:1px solid '+bannerColor+'44;" title="Composite margin: '+compMargin+' pts (VW + DNA vars + mascot root + Mode A + Life Path)">'+confStr+'</span>';
                 c+='</div>';
 
@@ -11105,7 +11135,15 @@ function _showBracketTable() {
                 // Fighter A cell
                 c+='<div id="'+cardId+'_cellA" onclick="toggleTapePick(\''+cardId+'\',\'A\',\''+safeA+'\',\''+safeB+'\')" style="'+aBorder+' opacity:'+aOpacity+';border-radius:6px;padding:8px 10px;text-align:center;cursor:pointer;transition:all 0.15s;">';
                 c+='<div style="color:#3b82f6;font-size:9px;font-weight:700;margin-bottom:2px;" title="Click to select as pick">'+roleA+'</div>';
-                c+='<div style="color:#e8e8e8;font-size:12px;font-weight:700;margin-bottom:3px;word-break:break-word;line-height:1.3;">'+nameA+'</div>';
+                c+='<div style="color:#e8e8e8;font-size:12px;font-weight:700;margin-bottom:2px;word-break:break-word;line-height:1.3;">'+nameA+'</div>';
+                if(recA||flagA||rankA) {
+                    c+='<div style="display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:2px;">';
+                    if(flagA) c+='<img src="'+flagA+'" alt="'+countryA+'" style="height:12px;border-radius:1px;" title="'+countryA+'">';
+                    if(recA) c+='<span style="color:#4a5568;font-size:9px;cursor:help;" title="Record: wins-losses-draws">'+recA+'</span>';
+                    if(rankA) c+='<span style="color:#a78bfa;font-size:9px;cursor:help;" title="ATP/WTA ranking or seeding">'+rankA+'</span>';
+                    c+='</div>';
+                }
+                if(state==='post'&&espnWinner===nameA) c+='<div style="font-size:9px;font-weight:800;color:#10b981;margin-bottom:2px;">✅ WINNER</div>';
                 c+='<div id="'+cardId+'_dob_A" style="min-height:13px;margin-bottom:3px;">'+renderDobCell(dobA,allVW,'#3b82f6',nameA)+'</div>';
                 c+='<div style="color:'+(aWin?'#3b82f6':'#4a5568')+';font-size:19px;font-weight:900;line-height:1;" title="VW tape base score">'+sA.total+'</div>';
                 c+='<div style="color:#4a5568;font-size:9px;margin-top:1px;">VW pts</div>';
@@ -11128,7 +11166,15 @@ function _showBracketTable() {
                 // Fighter B cell
                 c+='<div id="'+cardId+'_cellB" onclick="toggleTapePick(\''+cardId+'\',\'B\',\''+safeA+'\',\''+safeB+'\')" style="'+bBorder+' opacity:'+bOpacity+';border-radius:6px;padding:8px 10px;text-align:center;cursor:pointer;transition:all 0.15s;">';
                 c+='<div style="color:#ef4444;font-size:9px;font-weight:700;margin-bottom:2px;" title="Click to select as pick">'+roleB+'</div>';
-                c+='<div style="color:#e8e8e8;font-size:12px;font-weight:700;margin-bottom:3px;word-break:break-word;line-height:1.3;">'+nameB+'</div>';
+                c+='<div style="color:#e8e8e8;font-size:12px;font-weight:700;margin-bottom:2px;word-break:break-word;line-height:1.3;">'+nameB+'</div>';
+                if(recB||flagB||rankB) {
+                    c+='<div style="display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:2px;">';
+                    if(flagB) c+='<img src="'+flagB+'" alt="'+countryB+'" style="height:12px;border-radius:1px;" title="'+countryB+'">';
+                    if(recB) c+='<span style="color:#4a5568;font-size:9px;cursor:help;" title="Record: wins-losses-draws">'+recB+'</span>';
+                    if(rankB) c+='<span style="color:#a78bfa;font-size:9px;cursor:help;" title="ATP/WTA ranking or seeding">'+rankB+'</span>';
+                    c+='</div>';
+                }
+                if(state==='post'&&espnWinner===nameB) c+='<div style="font-size:9px;font-weight:800;color:#10b981;margin-bottom:2px;">✅ WINNER</div>';
                 c+='<div id="'+cardId+'_dob_B" style="min-height:13px;margin-bottom:3px;">'+renderDobCell(dobB,allVW,'#ef4444',nameB)+'</div>';
                 c+='<div style="color:'+(bWin?'#ef4444':'#4a5568')+';font-size:19px;font-weight:900;line-height:1;" title="VW tape base score">'+sB.total+'</div>';
                 c+='<div style="color:#4a5568;font-size:9px;margin-top:1px;">VW pts</div>';
@@ -11235,54 +11281,58 @@ function _showBracketTable() {
                     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
                 })();
                 var KNOWN_CARDS = {
+                    '2026-03-28': {
+                        eventName: 'UFC Fight Night: Adesanya vs. Pyfer',
+                        venue: 'Climate Pledge Arena, Seattle, WA',
+                        sections: [
+                            { label: 'Main Card (8PM ET)', fights: [
+                                { a:'Israel Adesanya', b:'Joe Pyfer', wt:'Middleweight', recA:'24-5-0', recB:'15-3-0', cA:'Nigeria', cB:'USA' },
+                                { a:'Alexa Grasso', b:'Maycee Barber', wt:'W Flyweight', recA:'16-5-1', recB:'15-2-0', cA:'Mexico', cB:'USA' },
+                                { a:'Michael Chiesa', b:'Carlston Harris', wt:'Welterweight', recA:'19-7-0', recB:'19-7-0', cA:'USA', cB:'Guyana' },
+                                { a:'Julian Erosa', b:'Lerryan Douglas', wt:'Featherweight', recA:'31-13-0', recB:'13-5-0', cA:'USA', cB:'Brazil' },
+                                { a:'Mansur Abdul-Malik', b:'Yousri Belgaroui', wt:'Middleweight', recA:'9-0-1', recB:'9-3-0', cA:'USA', cB:'Netherlands' },
+                                { a:'Terrance McKinney', b:'Kyle Nelson', wt:'Lightweight', recA:'17-8-0', recB:'17-6-1', cA:'USA', cB:'Canada' }
+                            ]},
+                            { label: 'Prelims (5PM ET)', fights: [
+                                { a:'Chase Hooper', b:'Lance Gibson Jr.', wt:'Lightweight', recA:'16-4-1', recB:'9-2-0', cA:'USA', cB:'Canada' },
+                                { a:'Marcin Tybura', b:'Valter Walker', wt:'Heavyweight', recA:'27-10-0', recB:'15-1-0', cA:'Poland', cB:'Brazil' },
+                                { a:'Casey ONeil', b:'Gabriella Fernandes', wt:'W Flyweight', recA:'10-2-0', recB:'11-3-0', cA:'Australia', cB:'Brazil' },
+                                { a:'Navajo Stirling', b:'Bruno Lopes', wt:'Light Heavyweight', recA:'8-0-0', recB:'14-2-0', cA:'New Zealand', cB:'Brazil' },
+                                { a:'Alexia Thainara', b:'Bruna Brasil', wt:'W Strawweight', recA:'13-1-0', recB:'11-6-1', cA:'Brazil', cB:'Brazil' },
+                                { a:'Zhu Kangjie', b:'Marcio Barbosa', wt:'Featherweight', recA:'20-4-0', recB:'17-2-0', cA:'China', cB:'Brazil' }
+                            ]}
+                        ]
+                    },
                     '2026-03-21': {
                         eventName: 'UFC Fight Night: Evloev vs. Murphy',
                         venue: 'The O2 Arena, London, England',
                         sections: [
                             { label: 'Main Card (4PM ET)', fights: [
-                                ['Movsar Evloev', 'Lerone Murphy'],
-                                ['Luke Riley', 'Michael Aswell Jr'],
-                                ['Michael Page', 'Sam Patterson'],
-                                ['Igor Baraniewski', 'Austen Lane'],
-                                ['Roman Dolidze', 'Cody Brundage']
+                                { a:'Movsar Evloev', b:'Lerone Murphy', wt:'Featherweight', recA:'19-0-0', recB:'17-0-1', cA:'Russia', cB:'England' },
+                                { a:'Luke Riley', b:'Michael Aswell Jr', wt:'Middleweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Michael Page', b:'Sam Patterson', wt:'Middleweight', recA:'21-8-0', recB:'', cA:'England', cB:'England' },
+                                { a:'Igor Baraniewski', b:'Austen Lane', wt:'Heavyweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Roman Dolidze', b:'Cody Brundage', wt:'Light Heavyweight', recA:'', recB:'', cA:'', cB:'' }
                             ]},
                             { label: 'Prelims (1PM ET)', fights: [
-                                ['Kurtis Campbell', 'Danny Silva'],
-                                ['Mason Jones', 'Axel Sola'],
-                                ['Nathaniel Wood', 'Losene Keita'],
-                                ['Mario Pinto', 'Felipe Franco'],
-                                ['Albert Trocoli', 'Marius Kondratavicus'],
-                                ['Liam Sutherland', 'Brando Pericic'],
-                                ['Shem Rock', 'Abdul Al-Selwady'],
-                                ['Shanelle Dyer', 'Rayanne Oliveira']
+                                { a:'Kurtis Campbell', b:'Danny Silva', wt:'Welterweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Mason Jones', b:'Axel Sola', wt:'Lightweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Nathaniel Wood', b:'Losene Keita', wt:'Bantamweight', recA:'', recB:'', cA:'England', cB:'' },
+                                { a:'Mario Pinto', b:'Felipe Franco', wt:'Featherweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Albert Trocoli', b:'Marius Kondratavicus', wt:'Bantamweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Liam Sutherland', b:'Brando Pericic', wt:'Light Heavyweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Shem Rock', b:'Abdul Al-Selwady', wt:'Middleweight', recA:'', recB:'', cA:'', cB:'' },
+                                { a:'Shanelle Dyer', b:'Rayanne Oliveira', wt:'W Strawweight', recA:'', recB:'', cA:'', cB:'' }
                             ]}
                         ]
                     },
-                    '2026-03-14': {
-                        eventName: 'UFC Fight Night: Emmett vs. Vallejos',
-                        venue: 'Meta APEX, Las Vegas',
-                        sections: [
-                            { label: 'Main Card (8PM ET)', fights: [
-                                ['Josh Emmett', 'Kevin Vallejos'],
-                                ['Amanda Lemos', 'Gillian Robertson'],
-                                ['Andre Fili', 'Jose Miguel Delgado'],
-                                ['Ion Cutelaba', 'Oumar Sy'],
-                                ['Charles Johnson', 'Bruno Silva']
-                            ]},
-                            { label: 'Prelims (6PM ET)', fights: [
-                                ['Elijah Smith', 'SuYoung You'],
-                                ['Chris Curtis', 'Myktybek Orolbai'],
-                                ['Vitor Petrino', 'Steven Asplund'],
-                                ['Brad Tavares', 'Eryk Anders'],
-                                ['Piera Rodriguez', 'Sam Hughes']
-                            ]}
-                        ]
-                    }
                 };
 
                 var fights = [];
                 var eventName = '';
+                var eventVenue = '';
                 var apiSuccess = false;
+                window._fightMeta = window._fightMeta || {};
 
                 // ── Try ESPN API first ──
                 try {
@@ -11322,6 +11372,8 @@ function _showBracketTable() {
 
                         if (targetEvent) {
                             eventName = targetEvent.name || targetEvent.shortName || 'UFC Event';
+                            eventVenue = (targetEvent.competitions && targetEvent.competitions[0] &&
+                                         targetEvent.competitions[0].venue && targetEvent.competitions[0].venue.fullName) || '';
 
                             // Step 2: Get summary for this event to get ALL fights
                             var smCtrl = new AbortController();
@@ -11344,14 +11396,34 @@ function _showBracketTable() {
                                     var compState = (comp.status && comp.status.type) ? comp.status.type.state : 'pre';
                                     var competitors = comp.competitors || [];
                                     if (competitors.length < 2) return;
-                                    var nameA = (competitors[0].athlete && competitors[0].athlete.displayName) ||
-                                                (competitors[0].team && competitors[0].team.displayName) || '';
-                                    var nameB = (competitors[1].athlete && competitors[1].athlete.displayName) ||
-                                                (competitors[1].team && competitors[1].team.displayName) || '';
+                                    var cA = competitors[0], cB = competitors[1];
+                                    var nameA = (cA.athlete && cA.athlete.displayName) || (cA.team && cA.team.displayName) || '';
+                                    var nameB = (cB.athlete && cB.athlete.displayName) || (cB.team && cB.team.displayName) || '';
                                     if (!nameA || !nameB) return;
-                                    var weight = (comp.notes && comp.notes[0] && comp.notes[0].headline) || '';
+                                    var weight  = (comp.notes && comp.notes[0] && comp.notes[0].headline) || '';
+                                    var recA    = (cA.records && cA.records[0] && cA.records[0].summary) || (cA.athlete && cA.athlete.record) || '';
+                                    var recB    = (cB.records && cB.records[0] && cB.records[0].summary) || (cB.athlete && cB.athlete.record) || '';
+                                    var flagA   = (cA.athlete && cA.athlete.flag && cA.athlete.flag.href) || '';
+                                    var flagB   = (cB.athlete && cB.athlete.flag && cB.athlete.flag.href) || '';
+                                    var countryA= (cA.athlete && cA.athlete.flag && cA.athlete.flag.alt) || '';
+                                    var countryB= (cB.athlete && cB.athlete.flag && cB.athlete.flag.alt) || '';
+                                    var resultMethod = '';
+                                    var resultRound  = '';
+                                    var resultTime   = '';
+                                    var winner       = '';
+                                    if (compState === 'post') {
+                                        resultMethod = (comp.status && comp.status.type && comp.status.type.shortDetail) || '';
+                                        if (comp.status && comp.status.detail) resultMethod = comp.status.detail;
+                                        winner = cA.winner ? nameA : cB.winner ? nameB : '';
+                                    }
+                                    if (nameA) window._fightMeta = window._fightMeta || {};
+                                    if (nameA) window._fightMeta[nameA] = { record: recA, flag: flagA, country: countryA };
+                                    if (nameB) window._fightMeta[nameB] = { record: recB, flag: flagB, country: countryB };
                                     fights.push({ nameA: nameA, nameB: nameB, eventName: eventName,
-                                                  timeStr: weight, state: compState });
+                                                  timeStr: weight, state: compState,
+                                                  recA: recA, recB: recB, flagA: flagA, flagB: flagB,
+                                                  countryA: countryA, countryB: countryB,
+                                                  resultMethod: resultMethod, winner: winner });
                                 });
                                 if (fights.length > 0) apiSuccess = true;
                             }
@@ -11362,13 +11434,23 @@ function _showBracketTable() {
                                     var compState = (comp.status && comp.status.type) ? comp.status.type.state : 'pre';
                                     var competitors = comp.competitors || [];
                                     if (competitors.length < 2) return;
-                                    var nameA = (competitors[0].athlete && competitors[0].athlete.displayName) ||
-                                                (competitors[0].team && competitors[0].team.displayName) || '';
-                                    var nameB = (competitors[1].athlete && competitors[1].athlete.displayName) ||
-                                                (competitors[1].team && competitors[1].team.displayName) || '';
+                                    var cA = competitors[0], cB = competitors[1];
+                                    var nameA = (cA.athlete && cA.athlete.displayName) || (cA.team && cA.team.displayName) || '';
+                                    var nameB = (cB.athlete && cB.athlete.displayName) || (cB.team && cB.team.displayName) || '';
                                     if (!nameA || !nameB) return;
+                                    var recA = (cA.records && cA.records[0] && cA.records[0].summary) || '';
+                                    var recB = (cB.records && cB.records[0] && cB.records[0].summary) || '';
+                                    var flagA = (cA.athlete && cA.athlete.flag && cA.athlete.flag.href) || '';
+                                    var flagB = (cB.athlete && cB.athlete.flag && cB.athlete.flag.href) || '';
+                                    var countryA = (cA.athlete && cA.athlete.flag && cA.athlete.flag.alt) || '';
+                                    var countryB = (cB.athlete && cB.athlete.flag && cB.athlete.flag.alt) || '';
+                                    var winner = cA.winner ? nameA : cB.winner ? nameB : '';
+                                    if (nameA) { window._fightMeta = window._fightMeta||{}; window._fightMeta[nameA]={record:recA,flag:flagA,country:countryA}; }
+                                    if (nameB) { window._fightMeta = window._fightMeta||{}; window._fightMeta[nameB]={record:recB,flag:flagB,country:countryB}; }
                                     fights.push({ nameA: nameA, nameB: nameB, eventName: eventName,
-                                                  timeStr: '', state: compState });
+                                                  timeStr: '', state: compState,
+                                                  recA: recA, recB: recB, flagA: flagA, flagB: flagB,
+                                                  countryA: countryA, countryB: countryB, winner: winner });
                                 });
                                 if (fights.length > 0) apiSuccess = true;
                             }
@@ -11378,18 +11460,69 @@ function _showBracketTable() {
                     console.warn('MMA API error:', apiErr.message);
                 }
 
-                // ── Use hardcoded card if API had no data ──
+                // ── Use hardcoded cards if API had no data ──
+                // Strategy: show TODAY's card + NEXT upcoming card; collapse past cards
                 var usingFallback = false;
-                if (fights.length === 0 && KNOWN_CARDS[TODAY_DATE_STR]) {
-                    var card = KNOWN_CARDS[TODAY_DATE_STR];
-                    eventName = card.eventName;
-                    usingFallback = true;
-                    card.sections.forEach(function(section) {
-                        section.fights.forEach(function(pair) {
-                            fights.push({ nameA: pair[0], nameB: pair[1], eventName: card.eventName,
-                                          timeStr: section.label, state: 'pre', section: section.label });
-                        });
+                var pastFights = [];   // completed events to collapse
+                var upcomingFights = []; // next event to show expanded
+
+                if (fights.length === 0) {
+                    var today_d = new Date(); today_d.setHours(0,0,0,0);
+                    var allDates = Object.keys(KNOWN_CARDS).sort();
+                    // Find today or closest upcoming
+                    var todayCard = KNOWN_CARDS[TODAY_DATE_STR];
+                    var nextCardDate = null, nextCard = null, pastCards = [];
+                    allDates.forEach(function(dk) {
+                        var d = new Date(dk+'T12:00:00'); d.setHours(0,0,0,0);
+                        if (d > today_d && !nextCard) { nextCardDate = dk; nextCard = KNOWN_CARDS[dk]; }
+                        else if (d < today_d) { pastCards.push({date: dk, card: KNOWN_CARDS[dk]}); }
                     });
+
+                    function cardToFights(card, dateStr, isUpcoming) {
+                        var result = [];
+                        card.sections.forEach(function(section) {
+                            section.fights.forEach(function(f) {
+                                var nA = typeof f === 'object' ? f.a : f[0];
+                                var nB = typeof f === 'object' ? f.b : f[1];
+                                var wt = typeof f === 'object' ? (f.wt||'') : '';
+                                var rA = typeof f === 'object' ? (f.recA||'') : '';
+                                var rB = typeof f === 'object' ? (f.recB||'') : '';
+                                var cA = typeof f === 'object' ? (f.cA||'') : '';
+                                var cB = typeof f === 'object' ? (f.cB||'') : '';
+                                if(nA) { window._fightMeta=window._fightMeta||{}; window._fightMeta[nA]={record:rA,country:cA,flag:''}; }
+                                if(nB) { window._fightMeta=window._fightMeta||{}; window._fightMeta[nB]={record:rB,country:cB,flag:''}; }
+                                result.push({ nameA: nA, nameB: nB, eventName: card.eventName,
+                                              timeStr: wt, state: isUpcoming?'pre':'post',
+                                              section: section.label, eventDate: dateStr,
+                                              recA: rA, recB: rB, countryA: cA, countryB: cB });
+                            });
+                        });
+                        return result;
+                    }
+
+                    usingFallback = true;
+                    // Today's card goes in main fights[]
+                    if (todayCard) {
+                        eventName = todayCard.eventName;
+                        eventVenue = todayCard.venue || '';
+                        fights = fights.concat(cardToFights(todayCard, TODAY_DATE_STR, false));
+                    }
+                    // Next upcoming card
+                    if (nextCard) {
+                        if (!eventName) { eventName = nextCard.eventName; eventVenue = nextCard.venue || ''; }
+                        upcomingFights = cardToFights(nextCard, nextCardDate, true);
+                    }
+                    // Past cards for collapsed view
+                    pastCards.forEach(function(pc) {
+                        pastFights = pastFights.concat(cardToFights(pc.card, pc.date, false).map(function(f){ f._pastCard = pc.card.eventName; return f; }));
+                    });
+
+                    // If no today card either, show next upcoming as main
+                    if (fights.length === 0 && upcomingFights.length > 0) {
+                        fights = upcomingFights; upcomingFights = [];
+                        eventName = nextCard ? nextCard.eventName : '';
+                        eventVenue = nextCard ? (nextCard.venue||'') : '';
+                    }
                 }
 
 
@@ -11412,20 +11545,89 @@ function _showBracketTable() {
 
                 var cardsHTML = '';
 
-                // Event header
+                // ── Auto-run V4 predictions and pre-select winner for each fight ──
+                function v4AutoPick(nA, nB) {
+                    try {
+                        var pA_ = buildTSPlayer(nA), pB_ = buildTSPlayer(nB);
+                        var sA_ = scoreTSPlayer(pA_), sB_ = scoreTSPlayer(pB_);
+                        // Composite: VW + DNA variation score + mascot root
+                        var DNS_ = [7,1,3], DNL_ = [4,5];
+                        function _mr(n){ var p=n.trim().split(/\s+/),m=p[p.length-1],s=0; m.toUpperCase().replace(/[^A-Z]/g,'').split('').forEach(function(c){s+=c.charCodeAt(0)-64;}); while(s>9)s=String(s).split('').reduce(function(a,d){return a+parseInt(d);},0); return s||null; }
+                        function _dnaVarScore(pl){ var sc=0; Object.keys(pl.variations).forEach(function(vk){ var rc={}; Object.values(CIPHERS).forEach(function(fn){ var r=calculateDigitalRoot(fn(pl.variations[vk])).root; rc[r]=(rc[r]||0)+1; }); var dom=Object.keys(rc).map(Number).sort(function(a,b){return rc[b]-rc[a];})[0]; if(DNS_.indexOf(dom)!==-1) sc++; }); return sc; }
+                        var mrA_=_mr(nA), mrB_=_mr(nB);
+                        var cA_= sA_.total + _dnaVarScore(pA_)*25 + (mrA_&&DNS_.indexOf(mrA_)!==-1?50:mrA_&&DNL_.indexOf(mrA_)!==-1?-35:0);
+                        var cB_= sB_.total + _dnaVarScore(pB_)*25 + (mrB_&&DNS_.indexOf(mrB_)!==-1?50:mrB_&&DNL_.indexOf(mrB_)!==-1?-35:0);
+                        return cA_ >= cB_ ? 'A' : 'B';
+                    } catch(e) { return null; }
+                }
+
+                // Auto-log predictions for all upcoming fights (fire-and-forget)
+                function autoLogFight(f, pick) {
+                    try {
+                        var pickedName = pick==='A' ? f.nameA : f.nameB;
+                        var gameId = 'mma_' + f.nameA.replace(/\s/g,'') + '_' + f.nameB.replace(/\s/g,'') + '_' + (f.eventDate||TODAY_DATE_STR);
+                        if (accuracyTracker.predictions.has(gameId)) return; // already logged
+                        var pA_ = buildTSPlayer(f.nameA), pB_ = buildTSPlayer(f.nameB);
+                        var sA_ = scoreTSPlayer(pA_), sB_ = scoreTSPlayer(pB_);
+                        var record = {
+                            gameId: gameId, timestamp: Date.now(),
+                            gameDate: new Date((f.eventDate||TODAY_DATE_STR)+'T20:00:00').getTime(),
+                            sport: 'mma', homeTeam: f.nameA, awayTeam: f.nameB,
+                            isTapeMatch: true,
+                            predictedHomeWP: sA_.total >= sB_.total ? Math.round(sA_.total/(sA_.total+sB_.total)*100) : Math.round(sB_.total/(sA_.total+sB_.total)*100),
+                            v4Winner: pickedName, confidence: 55,
+                            modelVersion: 'V4-Auto', status: 'PENDING',
+                            vegasSpread: null, actualHomeScore: null, actualAwayScore: null,
+                            fetchAttempts: 0, lastFetchAttempt: null,
+                            tapeScoreA: sA_.total, tapeScoreB: sB_.total
+                        };
+                        accuracyTracker.predictions.set(gameId, record);
+                        accuracyTracker.saveToStorage();
+                    } catch(e) { console.warn('autoLogFight error:', e.message); }
+                }
+
+                // Current event header
                 cardsHTML += '<div style="background: #1a1500; border: 1px solid #f59e0b44; border-radius: 6px; ' +
                     'padding: 10px 14px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">' +
                     '<div>' +
                     '<div style="color: #f59e0b; font-size: 12px; font-weight: 700;">🥊 ' + eventName + '</div>' +
+                    (eventVenue ? '<div style="color: #4a5568; font-size: 10px; margin-top: 2px;">📍 ' + eventVenue + '</div>' : '') +
                     (usingFallback ? '<div style="color: #4a5568; font-size: 10px; margin-top: 2px;">📋 From ESPN schedule · ESPN API unavailable</div>' : '') +
                     '</div>' +
                     '<a href="https://www.espn.com/mma/fightcenter" target="_blank" ' +
                     'style="color: #3b82f6; font-size: 10px; text-decoration: none;">View on ESPN →</a>' +
                     '</div>';
 
+                // ── Past events — collapsed accordion ──
+                if (pastFights.length > 0) {
+                    var pastEvents = {};
+                    pastFights.forEach(function(f){ var k=f._pastCard||'Past Event'; if(!pastEvents[k]) pastEvents[k]=[]; pastEvents[k].push(f); });
+                    Object.keys(pastEvents).forEach(function(evName) {
+                        var pid = 'past_'+evName.replace(/[^a-zA-Z]/g,'');
+                        cardsHTML += '<div style="margin-bottom:10px;">';
+                        var _pidSafe = pid;
+                        cardsHTML += '<button onclick="(function(){var el=document.getElementById(\'' + _pidSafe + '\');var btn=this;if(el.style.display===\'none\'){el.style.display=\'block\';btn.querySelector(\'span:last-child\').textContent=\'▲ collapse\';}else{el.style.display=\'none\';btn.querySelector(\'span:last-child\').textContent=\'▼ expand\';}}).call(this)" ' +
+                            'style="width:100%;text-align:left;background:#0f1117;border:1px solid #2a3142;border-radius:6px;padding:8px 12px;color:#4a5568;cursor:pointer;font-size:11px;display:flex;justify-content:space-between;align-items:center;">' +
+                            '<span>📁 ' + evName + ' <span style="color:#2a3142;font-size:9px;">· ' + pastEvents[evName].length + ' fights · click to expand</span></span>' +
+                            '<span style="font-size:9px;">▼ expand</span></button>';
+                        cardsHTML += '<div id="'+pid+'" style="display:none;margin-top:4px;">';
+                        pastEvents[evName].forEach(function(f) {
+                            try { cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', 'post', f); } catch(e) {}
+                        });
+                        cardsHTML += '</div></div>';
+                    });
+                }
+
                 fights.forEach(function(f) {
+                    // Auto-pick and pre-select
+                    var autoPick = v4AutoPick(f.nameA, f.nameB);
+                    var cardId_ = 'mc_'+(f.nameA+f.nameB).replace(/[^a-zA-Z]/g,'').substring(0,24);
+                    if (autoPick && !window._tapePicksMap[cardId_]) {
+                        window._tapePicksMap[cardId_] = autoPick;
+                    }
+                    if (f.state === 'pre') autoLogFight(f, autoPick);
                     try {
-                        cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', f.state);
+                        cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', f.state, f);
                     } catch(cardErr) {
                         console.error('buildMatchCard CRASH for', f.nameA, 'vs', f.nameB, ':', cardErr.message, cardErr.stack);
                         cardsHTML += '<div style="background:#1a0808;border:1px solid #ef444455;border-radius:6px;padding:10px;margin-bottom:8px;">'
@@ -11435,6 +11637,29 @@ function _showBracketTable() {
                             + '</div>';
                     }
                 });
+                // ── Upcoming event ──
+                if (upcomingFights.length > 0) {
+                    var nextEv = upcomingFights[0] && upcomingFights[0].eventName || 'Next UFC Event';
+                    var nextVenue = KNOWN_CARDS[Object.keys(KNOWN_CARDS).find(function(dk){ return new Date(dk+'T12:00:00') > new Date(); })||''] ;
+                    var nextVenueStr = nextVenue ? (nextVenue.venue||'') : '';
+                    var nextDate = Object.keys(KNOWN_CARDS).filter(function(dk){ return new Date(dk+'T12:00:00') > new Date(); }).sort()[0] || '';
+                    var nextDateLabel = nextDate ? new Date(nextDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '';
+                    cardsHTML += '<div style="margin-top:18px;">';
+                    cardsHTML += '<div style="background:#0a1828;border:1px solid #3b82f644;border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">';
+                    cardsHTML += '<div><div style="color:#3b82f6;font-size:12px;font-weight:700;">🥊 ' + nextEv + '</div>';
+                    if(nextVenueStr) cardsHTML += '<div style="color:#4a5568;font-size:10px;margin-top:2px;">📍 ' + nextVenueStr + '</div>';
+                    if(nextDateLabel) cardsHTML += '<div style="color:#a78bfa;font-size:10px;margin-top:1px;">📅 ' + nextDateLabel + ' · V4 auto-predictions pre-selected</div>';
+                    cardsHTML += '</div><a href="https://www.espn.com/mma/fightcenter" target="_blank" style="color:#3b82f6;font-size:10px;text-decoration:none;">View on ESPN →</a></div>';
+                    upcomingFights.forEach(function(f) {
+                        var autoPick = v4AutoPick(f.nameA, f.nameB);
+                        var cId_ = 'mc_'+(f.nameA+f.nameB).replace(/[^a-zA-Z]/g,'').substring(0,24);
+                        if (autoPick && !window._tapePicksMap[cId_]) window._tapePicksMap[cId_] = autoPick;
+                        autoLogFight(f, autoPick);
+                        try { cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', 'pre', f); } catch(e) {}
+                    });
+                    cardsHTML += '</div>';
+                }
+
                 container.innerHTML = cardsHTML || '<div style="color:#f59e0b;padding:20px;text-align:center;">⚠️ Could not render fight cards. Check console.</div>';
                 return;
             }
@@ -11458,13 +11683,16 @@ function _showBracketTable() {
             var BASE_WTA = 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard';
             var BASE_GEN = 'https://site.api.espn.com/apis/site/v2/sports/tennis/scoreboard';
 
-            // ESPN tennis endpoints — only site/v2/atp and site/v2/wta work from GitHub Pages
-            // Generic tennis/scoreboard and apis/v2/ paths are blocked by ESPN CORS policy
+            // ESPN tennis endpoints — try multiple including tournament-specific
             var tennisEndpoints = [
                 BASE_ATP + '?dates=' + todayStr,
                 BASE_WTA + '?dates=' + todayStr,
+                BASE_GEN + '?dates=' + todayStr,
                 BASE_ATP,
-                BASE_WTA
+                BASE_WTA,
+                // Miami Open tournament-specific (eventId 713 = Miami Open 2026)
+                'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard?eventId=713',
+                'https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/events/713/competitions?limit=100&lang=en&region=us'
             ];
 
             for (var tIdx = 0; tIdx < tennisEndpoints.length; tIdx++) {
@@ -11496,8 +11724,31 @@ function _showBracketTable() {
                                     tTimeStr = tDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
                                 }
                             } catch(ignore) {}
+                            var tA = competitors[0], tB = competitors[1];
+                            var seedA    = (tA.athlete && tA.athlete.seed) ? '#'+tA.athlete.seed : '';
+                            var seedB    = (tB.athlete && tB.athlete.seed) ? '#'+tB.athlete.seed : '';
+                            var rankA    = (tA.athlete && tA.athlete.ranking) ? 'R'+tA.athlete.ranking : seedA;
+                            var rankB    = (tB.athlete && tB.athlete.ranking) ? 'R'+tB.athlete.ranking : seedB;
+                            var flagTA   = (tA.athlete && tA.athlete.flag && tA.athlete.flag.href) || '';
+                            var flagTB   = (tB.athlete && tB.athlete.flag && tB.athlete.flag.href) || '';
+                            var countryTA= (tA.athlete && tA.athlete.flag && tA.athlete.flag.alt) || '';
+                            var countryTB= (tB.athlete && tB.athlete.flag && tB.athlete.flag.alt) || '';
+                            var score    = '';
+                            if (compState === 'post' || compState === 'in') {
+                                try {
+                                    var sets = comp.linescores || [];
+                                    score = sets.map(function(ls){ return (ls.value||''); }).join(' ');
+                                } catch(e){}
+                            }
+                            var tWinner = tA.winner ? nameA : tB.winner ? nameB : '';
+                            if (nameA) { window._fightMeta = window._fightMeta||{}; window._fightMeta[nameA]={flag:flagTA,country:countryTA,rank:rankA}; }
+                            if (nameB) { window._fightMeta = window._fightMeta||{}; window._fightMeta[nameB]={flag:flagTB,country:countryTB,rank:rankB}; }
                             tennisMatches.push({ nameA: nameA, nameB: nameB, eventLabel: evLabel,
-                                                 timeStr: tTimeStr, state: compState });
+                                                 timeStr: tTimeStr, state: compState,
+                                                 rankA: rankA, rankB: rankB,
+                                                 flagA: flagTA, flagB: flagTB,
+                                                 countryA: countryTA, countryB: countryTB,
+                                                 score: score, winner: tWinner });
                         });
                     });
                 } catch(tErr) {
@@ -11517,7 +11768,7 @@ function _showBracketTable() {
                         '</div>';
                 }
                 tennisMatches.forEach(function(m) {
-                    tennisHTML += buildMatchCard(m.nameA, m.nameB, m.eventLabel, m.timeStr, m.state);
+                    tennisHTML += buildMatchCard(m.nameA, m.nameB, m.eventLabel, m.timeStr, m.state, m);
                 });
                 container.innerHTML = tennisHTML;
                 return;
@@ -11531,8 +11782,146 @@ function _showBracketTable() {
             var MIAMI_START = new Date('2026-03-16'); var MIAMI_END = new Date('2026-04-04');
             var inMiami = TODAY_TENNIS_D >= MIAMI_START && TODAY_TENNIS_D <= MIAMI_END;
 
+            // ── KNOWN_TOURNAMENTS fallback — Miami Open draw ──
+            // ── KNOWN_TOURNAMENTS fallback — Miami Open draw ──
+            // Keyed by date — app picks today's date automatically, falls back to next available
+            var _today_kt = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+            var KNOWN_TOURNAMENTS = {
+                miami_open_2026: {
+                    name: 'Miami Open 2026',
+                    venue: 'Hard Rock Stadium, Miami Gardens, FL',
+                    dateRange: 'Mar 17-29, 2026',
+                    espnUrl: 'https://www.espn.com/tennis/scoreboard/tournament/_/eventId/713-2026/competitionType/1',
+                    byDate: {
+                        '2026-03-21': [
+                            // ── Men Round 2 ──
+                            { a:'Damir Dzumhur', b:'Jannik Sinner', round:'M·R2', timeStr:'1:00 PM', cA:'Bosnia', cB:'Italy', rankB:'R2' },
+                            { a:'Rei Sakamoto', b:'Daniil Medvedev', round:'M·R2', timeStr:'Follows', cA:'Japan', cB:'Russia', rankB:'R9' },
+                            { a:'Martin Damm', b:'Alexander Zverev', round:'M·R2·Night', timeStr:'8:30 PM', cA:'Czech Republic', cB:'Germany', rankB:'R3' },
+                            { a:'Kamil Majchrzak', b:'Learner Tien', round:'M·R2', timeStr:'11:00 AM', cA:'Poland', cB:'USA', rankB:'R20' },
+                            { a:'Rafael Jodar', b:'Aleksandar Vukic', round:'M·R2', timeStr:'11:00 AM', cA:'Spain', cB:'Australia' },
+                            { a:'Felix Auger-Aliassime', b:'Ben Shelton', round:'M·R2', timeStr:'11:00 AM', cA:'Canada', cB:'USA', rankA:'R16', rankB:'R18' },
+                            { a:'Matteo Berrettini', b:'Alexander Bublik', round:'M·R2', timeStr:'Follows', cA:'Italy', cB:'Kazakhstan', rankB:'R10' },
+                            // ── Women ──
+                            { a:'Francesca Jones', b:'Jessica Pegula', round:'W·R2', timeStr:'12:00 PM', cA:'Great Britain', cB:'USA', rankB:'R5' },
+                            { a:'Alycia Parks', b:'Coco Gauff', round:'W·R3·Night', timeStr:'7:00 PM', cA:'USA', cB:'USA', rankB:'R4' },
+                            { a:'Elena-Gabriela Ruse', b:'Madison Keys', round:'W·R2', timeStr:'1:00 PM', cA:'Romania', cB:'USA', rankB:'R15' },
+                            { a:'Amanda Anisimova', b:'Yuliia Starodubtseva', round:'W·R3', timeStr:'Follows', cA:'USA', cB:'Ukraine', rankA:'R6' },
+                            { a:'Alexandra Eala', b:'Magda Linette', round:'W·R3', timeStr:'Follows', cA:'Philippines', cB:'Poland', rankA:'R31' },
+                            { a:'Iva Jovic', b:'Paula Badosa', round:'W·R2', timeStr:'11:00 AM', cA:'USA', cB:'Spain', rankA:'R18' },
+                            { a:'Qinwen Zheng', b:'Sloane Stephens', round:'W·R2', timeStr:'Follows', cA:'China', cB:'USA', rankA:'R23' },
+                            { a:'Mirra Andreeva', b:'Marie Bouzkova', round:'W·R2', timeStr:'Follows', cA:'Russia', cB:'Czech Republic', rankA:'R8' },
+                            { a:'Aryna Sabalenka', b:'Annie Li', round:'W·R2', timeStr:'Follows', cA:'Belarus', cB:'USA', rankA:'R1' }
+                        ],
+                        '2026-03-22': [
+                            // ── Men Round 3 ──
+                            { a:'Reilly Opelka', b:'Taylor Fritz', round:'M·R3', timeStr:'11:00 AM', cA:'USA', cB:'USA', rankB:'R6' },
+                            { a:'Carlos Alcaraz', b:'Sebastian Korda', round:'M·R3', timeStr:'Follows', cA:'Spain', cB:'USA', rankA:'R1', rankB:'R32' },
+                            { a:'Stefanos Tsitsipas', b:'Alex De Minaur', round:'M·R3', timeStr:'Night', cA:'Greece', cB:'Australia', rankB:'R5' },
+                            { a:'Rafael Jodar', b:'Tomas Etcheverry', round:'M·R3', timeStr:'11:00 AM', cA:'Spain', cB:'Argentina' },
+                            { a:'Martin Landaluce', b:'Karen Khachanov', round:'M·R3', timeStr:'Follows', cA:'Spain', cB:'Russia', rankB:'R14' },
+                            // ── Women Round 3 ──
+                            { a:'Jessica Pegula', b:'Leylah Fernandez', round:'W·R3', timeStr:'11:00 AM', cA:'USA', cB:'Canada', rankA:'R5' },
+                            { a:'Aryna Sabalenka', b:'TBD', round:'W·R3·Night', timeStr:'Night', cA:'Belarus', rankA:'R1' }
+                        ]
+                    }
+                }
+            };
+
             if (inMiami) {
-                // Clean info banner only — no Quick Add, no fake cards
+                var kTourney = KNOWN_TOURNAMENTS.miami_open_2026;
+                var todayMatchDate = _today_kt;
+                var tomorrowDate = (function(){ var d=new Date(); d.setDate(d.getDate()+1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+
+                // Pick today's matches first, fall back to nearest available date
+                var todayMatches = (kTourney && kTourney.byDate && kTourney.byDate[todayMatchDate]) || [];
+                var tomorrowMatches = (kTourney && kTourney.byDate && kTourney.byDate[tomorrowDate]) || [];
+
+                if ((!kTourney || !kTourney.byDate) || (todayMatches.length===0 && tomorrowMatches.length===0)) {
+                    container.innerHTML =
+                        '<div style="background:#0a1828;border:1px solid #3b82f644;border-radius:8px;padding:16px;">' +
+                        '<div style="color:#3b82f6;font-size:13px;font-weight:700;margin-bottom:6px;">🎾 Miami Open 2026</div>' +
+                        '<div style="color:#8b92a7;font-size:11px;margin-bottom:10px;">No matches loaded for today. Paste todays ESPN scores link into Claude to populate.</div>' +
+                        '<a href="https://www.espn.com/tennis/scoreboard/tournament/_/eventId/713-2026/competitionType/1" target="_blank" style="color:#3b82f6;font-size:11px;">Live Draw on ESPN →</a>' +
+                        '</div>';
+                    return;
+                }
+
+                function renderTennisDay(matches, dateStr, dateLabel) {
+                    var html2 = '';
+                    // Section header
+                    html2 += '<div style="background:#0a1828;border:1px solid #3b82f644;border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">';
+                    html2 += '<div>';
+                    html2 += '<div style="color:#3b82f6;font-size:13px;font-weight:700;">🎾 ' + (kTourney.name||'Miami Open') + '</div>';
+                    html2 += '<div style="color:#4a5568;font-size:10px;margin-top:2px;">📍 ' + (kTourney.venue||'') + '</div>';
+                    html2 += '<div style="color:#a78bfa;font-size:10px;margin-top:1px;">📅 ' + dateLabel + ' · '+matches.length+' matches · V4 auto-picks pre-selected</div>';
+                    html2 += '</div><a href="' + (kTourney.espnUrl||'https://www.espn.com/tennis') + '" target="_blank" style="color:#3b82f6;font-size:10px;text-decoration:none;">ESPN →</a>';
+                    html2 += '</div>';
+
+                    matches.forEach(function(m) {
+                        if (!m.a || !m.b) return;
+                        var isTBD = m.b.indexOf('TBD')!==-1 || m.a.indexOf('TBD')!==-1;
+                        var meta = { rankA:m.rankA||'', rankB:m.rankB||'', countryA:m.cA||'', countryB:m.cB||'', flagA:'', flagB:'', recA:'', recB:'', score:'', winner:'' };
+                        window._fightMeta = window._fightMeta||{};
+                        if(m.a) window._fightMeta[m.a] = {rank:m.rankA||'', country:m.cA||'', flag:''};
+                        if(m.b) window._fightMeta[m.b] = {rank:m.rankB||'', country:m.cB||'', flag:''};
+                        var pA_=buildTSPlayer(m.a), pB_=buildTSPlayer(m.b);
+                        var sA_=scoreTSPlayer(pA_), sB_=scoreTSPlayer(pB_);
+                        var autoPick = sA_.total >= sB_.total ? 'A' : 'B';
+                        var cId_='mc_'+(m.a+m.b).replace(/[^a-zA-Z]/g,'').substring(0,24);
+                        if(!window._tapePicksMap[cId_]) window._tapePicksMap[cId_]=autoPick;
+                        // Auto-log to accuracy tracker
+                        if (!isTBD) {
+                            try {
+                                var gid2='tennis_'+m.a.replace(/\s+/g,'')+'_'+m.b.replace(/\s+/g,'')+'_'+dateStr.replace(/-/g,'');
+                                if (!accuracyTracker.predictions.has(gid2)) {
+                                    var pickedName2=autoPick==='A'?m.a:m.b;
+                                    accuracyTracker.predictions.set(gid2, {
+                                        gameId:gid2, timestamp:Date.now(),
+                                        gameDate:new Date(dateStr+'T14:00:00').getTime(),
+                                        sport:'tennis', homeTeam:m.a, awayTeam:m.b,
+                                        isTapeMatch:true,
+                                        predictedHomeWP:sA_.total>=sB_.total?Math.round(sA_.total/(sA_.total+sB_.total)*100):Math.round(sB_.total/(sA_.total+sB_.total)*100),
+                                        v4Winner:pickedName2, confidence:55,
+                                        modelVersion:'V4-Auto', status:'PENDING',
+                                        vegasSpread:null, actualHomeScore:null, actualAwayScore:null,
+                                        fetchAttempts:0, lastFetchAttempt:null,
+                                        tapeScoreA:sA_.total, tapeScoreB:sB_.total
+                                    });
+                                    accuracyTracker.saveToStorage();
+                                }
+                            } catch(e2){}
+                        }
+                        try { html2 += buildMatchCard(m.a, m.b, m.round||'', m.timeStr||'', 'pre', meta); } catch(te){}
+                    });
+                    return html2;
+                }
+
+                var finalHTML = '';
+                if (todayMatches.length > 0) {
+                    finalHTML += renderTennisDay(todayMatches, todayMatchDate, 'Today · ' + new Date(todayMatchDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}));
+                }
+                if (tomorrowMatches.length > 0) {
+                    var tmLabel = 'Tomorrow · ' + new Date(tomorrowDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+                    if (todayMatches.length > 0) {
+                        // Collapsible tomorrow section
+                        var tmPid = 'tennis_tomorrow_'+tomorrowDate.replace(/-/g,'');
+                        finalHTML += '<div style="margin-top:14px;">';
+                        var _tmTogFn = '(function(){var el=document.getElementById("'+tmPid+'");var btn=this;if(el.style.display==="none"){el.style.display="block";btn.querySelector("span:last-child").textContent="▲ collapse";}else{el.style.display="none";btn.querySelector("span:last-child").textContent="▼ expand";}}).call(this)';
+                        finalHTML += '<button onclick="'+_tmTogFn+'" style="width:100%;text-align:left;background:#0a1828;border:1px solid #3b82f644;border-radius:6px;padding:8px 12px;color:#3b82f6;cursor:pointer;font-size:11px;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
+                        finalHTML += '<span>📅 ' + tmLabel + ' · '+tomorrowMatches.length+' matches · click to expand</span><span style="font-size:9px;">▼ expand</span></button>';
+                        finalHTML += '<div id="'+tmPid+'" style="display:none;">' + renderTennisDay(tomorrowMatches, tomorrowDate, tmLabel) + '</div>';
+                        finalHTML += '</div>';
+                    } else {
+                        finalHTML += renderTennisDay(tomorrowMatches, tomorrowDate, tmLabel);
+                    }
+                }
+                container.innerHTML = finalHTML;
+                return;
+            }
+
+            // Original Miami Open banner (fallback if somehow not in Miami)
+            if (false && inMiami) {
                 container.innerHTML =
                     '<div style="background:#0a1828;border:1px solid #3b82f644;border-radius:8px;padding:14px 16px;margin-bottom:14px;">' +
                     '  <div style="display:flex;justify-content:space-between;align-items:center;">' +
@@ -15149,32 +15538,39 @@ function _showBracketTable() {
             el.innerHTML = h;
         }
 
-        function renderDNARootMatrix() {
+        function renderDNARootMatrix(selectedDate) {
             var el = document.getElementById('content');
             if (!el) return;
 
+            // ── Determine viewed date ──
+            var todayActual = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+            var viewDate = selectedDate || todayActual;
+            var isToday  = viewDate === todayActual;
+
+            // ── Collect all dates that have results ──
+            var allDatesWithResults = {};
+            Array.from(accuracyTracker.results.values()).forEach(function(g){
+                var d = new Date(g.gameDate||g.timestamp);
+                var dk = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+                allDatesWithResults[dk] = (allDatesWithResults[dk]||0) + 1;
+            });
+            var sortedDates = Object.keys(allDatesWithResults).sort().reverse();
+            if (sortedDates.indexOf(todayActual) === -1) sortedDates.unshift(todayActual);
+            if (sortedDates.indexOf(viewDate)    === -1) viewDate = sortedDates[0] || todayActual;
+
             // ── Shared helpers ──
             var DNA_ROOTS = [1,2,3,4,5,6,7,8,9];
-            var DNA_COLORS = {
-                1:'#a78bfa', 3:'#a78bfa', 7:'#a78bfa',  // primary targets (purple)
-                6:'#10b981',                              // secondary positive (green)
-                4:'#ef4444', 5:'#ef4444',                 // loser roots (red)
-                2:'#8b92a7', 8:'#8b92a7', 9:'#8b92a7'    // neutral (grey)
-            };
-            var ROOT_LABELS = {
-                1:'R1', 2:'R2', 3:'R3', 4:'R4', 5:'R5',
-                6:'R6', 7:'R7', 8:'R8', 9:'R9'
-            };
-            var ROOT_TIPS = {
-                1: 'R1 — Primary target root (R7/R1/R3). Strong winner alignment signal.',
-                2: 'R2 — Neutral root. No strong W/L bias historically.',
-                3: 'R3 — Primary target root (R7/R1/R3). Strong winner alignment signal.',
-                4: 'R4 — Loser root (R4/R5). Appears more often in losing teams.',
-                5: 'R5 — Loser root (R4/R5). Underperforms in winners over recent data.',
-                6: 'R6 — Secondary positive root. Present in ~50% of winners via LD=1 baseline.',
-                7: 'R7 — Primary target root (R7/R1/R3). Strongest winner signal.',
-                8: 'R8 — Neutral root. No strong W/L bias historically.',
-                9: 'R9 — Neutral root. No strong W/L bias historically.'
+            var DNA_COLORS = { 1:'#a78bfa',3:'#a78bfa',7:'#a78bfa',6:'#10b981',4:'#ef4444',5:'#ef4444',2:'#8b92a7',8:'#8b92a7',9:'#8b92a7' };
+            var ROOT_TIPS  = {
+                1:'R1 — Primary target root (R7/R1/R3). Strong winner alignment signal.',
+                2:'R2 — Neutral root. No strong W/L bias historically.',
+                3:'R3 — Primary target root (R7/R1/R3). Strong winner alignment signal.',
+                4:'R4 — Loser root (R4/R5). Appears more often in losing teams.',
+                5:'R5 — Loser root (R4/R5). Underperforms in winners over recent data.',
+                6:'R6 — Secondary positive root. Present in ~50% of winners via LD=1 baseline.',
+                7:'R7 — Primary target root (R7/R1/R3). Strongest winner signal.',
+                8:'R8 — Neutral root. No strong W/L bias historically.',
+                9:'R9 — Neutral root. No strong W/L bias historically.'
             };
 
             function getMascotRoot(name) {
@@ -15190,62 +15586,38 @@ function _showBracketTable() {
 
             function getVariationRoots(name) {
                 var parts = name.trim().split(/\s+/);
-                var vars = {
-                    full: name,
-                    city: parts.length>1 ? parts.slice(0,-1).join(' ') : name,
-                    mascot: parts[parts.length-1] || name,
-                    abbrev: parts.map(function(p){return p[0]||'';}).join('').toUpperCase()
-                };
-                var counts = {};
-                for(var r=1;r<=9;r++) counts[r]=0;
-                Object.values(vars).forEach(function(v){
-                    Object.values(CIPHERS).forEach(function(fn){
-                        var r = calculateDigitalRoot(fn(v)).root;
-                        if(r>=1&&r<=9) counts[r]++;
-                    });
-                });
+                var vars = { full:name, city:parts.length>1?parts.slice(0,-1).join(' '):name, mascot:parts[parts.length-1]||name, abbrev:parts.map(function(p){return p[0]||'';}).join('').toUpperCase() };
+                var counts = {}; for(var r=1;r<=9;r++) counts[r]=0;
+                Object.values(vars).forEach(function(v){ Object.values(CIPHERS).forEach(function(fn){ var r=calculateDigitalRoot(fn(v)).root; if(r>=1&&r<=9) counts[r]++; }); });
                 var dominant = Object.keys(counts).map(Number).sort(function(a,b){return counts[b]-counts[a];})[0];
                 var varRoots = {};
-                Object.keys(vars).forEach(function(vk){
-                    var rc={};
-                    Object.values(CIPHERS).forEach(function(fn){
-                        var r=calculateDigitalRoot(fn(vars[vk])).root;
-                        rc[r]=(rc[r]||0)+1;
-                    });
-                    var dom=Object.keys(rc).map(Number).sort(function(a,b){return rc[b]-rc[a];})[0];
-                    varRoots[vk]=dom;
-                });
-                return { dominant: dominant, varRoots: varRoots, counts: counts };
+                Object.keys(vars).forEach(function(vk){ var rc={}; Object.values(CIPHERS).forEach(function(fn){ var r=calculateDigitalRoot(fn(vars[vk])).root; rc[r]=(rc[r]||0)+1; }); varRoots[vk]=Object.keys(rc).map(Number).sort(function(a,b){return rc[b]-rc[a];})[0]; });
+                return { dominant:dominant, varRoots:varRoots, counts:counts };
             }
 
-            // ── Pull completed and pending games ──
-            var todayStr = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
-            var allResults = Array.from(accuracyTracker.results.values())
-                .filter(function(g){ return g.status==='COMPLETED' && g.homeWon!==null; });
-            var todayResults = allResults.filter(function(g){
+            // ── Pull results for viewed date ──
+            var allResults = Array.from(accuracyTracker.results.values()).filter(function(g){ return g.status==='COMPLETED' && g.homeWon!==null; });
+            var viewResults = allResults.filter(function(g){
                 var d = new Date(g.gameDate||g.timestamp);
                 var dk = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-                return dk === todayStr;
+                return dk === viewDate;
             });
-            var pending = Array.from(accuracyTracker.predictions.values())
-                .filter(function(g){ return g.status==='PENDING'; });
 
-            // ── Build W/L root frequency for today ──
-            var winRoots = {}, lossRoots = {}; // root -> count
+            // ── Reconstruct VW for viewed date ──
+            var viewDateVW = null;
+            try { viewDateVW = calculateAllCalendarsVW(new Date(viewDate+'T12:00:00')); } catch(e){}
+            var viewDPM = viewDateVW ? (viewDateVW.gregorian||{}).dpm : null;
+
+            // ── Build W/L root frequency ──
+            var winRoots = {}, lossRoots = {};
             for(var r=1;r<=9;r++){ winRoots[r]=0; lossRoots[r]=0; }
-            var totalWins = 0, totalLosses = 0;
-
-            // Also track by variation type for the matrix rows
-            var varWinRoots = {full:{},city:{},mascot:{},abbrev:{}};
+            var varWinRoots  = {full:{},city:{},mascot:{},abbrev:{}};
             var varLossRoots = {full:{},city:{},mascot:{},abbrev:{}};
-            ['full','city','mascot','abbrev'].forEach(function(vk){
-                for(var r=1;r<=9;r++){ varWinRoots[vk][r]=0; varLossRoots[vk][r]=0; }
-            });
+            ['full','city','mascot','abbrev'].forEach(function(vk){ for(var r=1;r<=9;r++){ varWinRoots[vk][r]=0; varLossRoots[vk][r]=0; } });
 
-            todayResults.forEach(function(g){
+            viewResults.forEach(function(g){
                 var winner = g.homeWon ? g.homeTeam : g.awayTeam;
                 var loser  = g.homeWon ? g.awayTeam : g.homeTeam;
-                totalWins++;  totalLosses++;
                 var wRoots = getVariationRoots(winner);
                 var lRoots = getVariationRoots(loser);
                 winRoots[wRoots.dominant]  = (winRoots[wRoots.dominant]||0)  + 1;
@@ -15257,76 +15629,161 @@ function _showBracketTable() {
                 });
             });
 
-            // Classify roots based on todays data
+            // Confidence scoring: winRate × log2(games+2)
+            // This naturally ranks R7(80%,15g) above R4(86%,7g)
+            // Thresholds to qualify:
+            //   CONFIRMED  : conf >= 3.0  (e.g. 80%×15g → 3.16) — strong signal
+            //   PROBABLE   : conf >= 1.8  (e.g. 75%×8g  → 2.25) — likely signal
+            //   TENTATIVE  : raw rate qualifies but conf < 1.8 — low sample warning
+            function rootConf(w, tot) {
+                if(tot===0) return 0;
+                return (w/tot) * Math.log2(tot+2);
+            }
             var confirmedTargets = [], confirmedLosers = [], neutral = [];
             DNA_ROOTS.forEach(function(r){
-                var w = winRoots[r]||0, l = lossRoots[r]||0, tot = w+l;
+                var w=winRoots[r]||0, l=lossRoots[r]||0, tot=w+l;
                 if(tot===0) return;
-                var wpct = Math.round(w/tot*100);
-                if(wpct>=60) confirmedTargets.push({r:r, w:w, l:l, pct:wpct});
-                else if(wpct<=35) confirmedLosers.push({r:r, w:w, l:l, pct:wpct});
-                else neutral.push({r:r, w:w, l:l, pct:wpct});
+                var wpct=Math.round(w/tot*100);
+                var conf=rootConf(w,tot);
+                var tier = conf>=3.0 ? 'CONFIRMED' : conf>=1.8 ? 'PROBABLE' : 'TENTATIVE';
+                var entry = {r:r, w:w, l:l, pct:wpct, conf:parseFloat(conf.toFixed(2)), tier:tier};
+                if(wpct>=60)        confirmedTargets.push(entry);
+                else if(wpct<=35)   confirmedLosers.push(entry);
+                else                neutral.push(entry);
             });
-            confirmedTargets.sort(function(a,b){return b.pct-a.pct;});
-            confirmedLosers.sort(function(a,b){return a.pct-b.pct;});
+            // Sort by confidence score, not raw win rate
+            confirmedTargets.sort(function(a,b){return b.conf-a.conf;});
+            confirmedLosers.sort(function(a,b){return b.conf-a.conf;});
 
             // ── Build HTML ──
             var h = '';
             h += '<div style="max-width:1100px;margin:0 auto;padding:20px;">';
-            h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">';
+
+            // Title row
+            h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;">';
             h += '<button onclick="renderAccuracyDashboard()" style="background:#1a2535;border:1px solid #2a3142;color:#8b92a7;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;">← Back</button>';
             h += '<h2 style="margin:0;color:#a78bfa;font-size:16px;font-weight:800;">🧬 DNA Root W/L Matrix</h2>';
-            h += '<span style="font-size:11px;color:#4a5568;">Today: '+todayStr+' · '+todayResults.length+' completed games</span>';
+            h += '<span style="font-size:11px;color:'+(isToday?'#10b981':'#f59e0b')+';font-weight:700;background:'+(isToday?'#10b98118':'#f59e0b18')+';border:1px solid '+(isToday?'#10b98144':'#f59e0b44')+';padding:2px 8px;border-radius:4px;">'+(isToday?'TODAY':'HISTORICAL')+' \u00b7 '+viewDate+'</span>';
+            h += '<span style="font-size:11px;color:#4a5568;">'+viewResults.length+' completed games</span>';
             h += '</div>';
-            h += '<p style="color:#8b92a7;font-size:11px;margin-bottom:16px;">Each completed game\'s winner and loser has their mascot ordinal root computed. The matrix shows which roots (R1–R9) dominated winners vs losers today. Green = winner root pattern. Red = loser root pattern. Then apply this to remaining unplayed matchups.</p>';
 
-            if(todayResults.length === 0){
-                h += '<div style="background:#0f1420;border:1px solid #2a3142;border-radius:8px;padding:24px;text-align:center;color:#4a5568;">No completed games today yet. Check back after games finish, or view a historical date\'s pattern.</div>';
+            // Date picker + navigation
+            h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
+            h += '<span style="font-size:11px;color:#4a5568;font-weight:700;">VIEW DATE:</span>';
+            h += '<select onchange="renderDNARootMatrix(this.value)" style="background:#0a0e15;border:1px solid #2a3142;color:#e8e8e8;padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;">';
+            sortedDates.forEach(function(dk){
+                var cnt = allDatesWithResults[dk]||0;
+                var dLabel = dk===todayActual ? dk+' (Today)' : dk+' ('+cnt+' games)';
+                h += '<option value="'+dk+'"'+(dk===viewDate?' selected':'')+'>'+dLabel+'</option>';
+            });
+            h += '</select>';
+            var curIdx = sortedDates.indexOf(viewDate);
+            if(curIdx < sortedDates.length-1) h += '<button onclick="renderDNARootMatrix(\''+sortedDates[curIdx+1]+'\')" style="background:#1a2535;border:1px solid #2a3142;color:#8b92a7;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">← Older</button>';
+            if(curIdx > 0)                    h += '<button onclick="renderDNARootMatrix(\''+sortedDates[curIdx-1]+'\')" style="background:#1a2535;border:1px solid #2a3142;color:#8b92a7;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Newer →</button>';
+            h += '</div>';
+
+            // VW context banner
+            if(viewDateVW) {
+                h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:6px;padding:8px 12px;margin-bottom:10px;">';
+                h += '<div style="font-size:9px;color:#4a5568;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;" title="VW values for '+viewDate+' reconstructed from deterministic calendar math — identical to what the engines used that day.">Vibrational Weather \u00b7 '+viewDate+' (Gregorian)</div>';
+                h += '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">';
+                var vwM = [
+                    {k:'dpm',col:'#f59e0b',label:'DPM',tip:'Day Power Modifier (weight 5). Drives the trap matrix and DNA target root system.'},
+                    {k:'un', col:'#3b82f6',label:'UN', tip:'Universal Number (weight 4). Governing root frequency for the day.'},
+                    {k:'gd', col:'#10b981',label:'GD', tip:'Grand Day (weight 3). Prime alignment number.'},
+                    {k:'ld', col:'#8b5cf6',label:'LD', tip:'Lucky Day (weight 2). Supportive harmonic root.'}
+                ];
+                vwM.forEach(function(m){
+                    var val = (viewDateVW.gregorian||{})[m.k];
+                    h += '<span style="cursor:help;" title="'+m.label+'=R'+val+' on '+viewDate+'. '+m.tip+'">';
+                    h += '<span style="font-size:9px;color:'+m.col+';font-weight:700;">'+m.label+'</span> ';
+                    h += '<span style="font-size:16px;font-weight:900;color:'+m.col+';">'+val+'</span></span>';
+                });
+                if(viewDPM) {
+                    // Use actual matrix data if available — don't use hardcoded assumptions
+                    var _dataTarget = confirmedTargets.find(function(x){return x.r===viewDPM;});
+                    var _dataLoser  = confirmedLosers.find(function(x){return x.r===viewDPM;});
+                    var _hasData    = viewResults.length >= 10; // need enough games to be meaningful
+                    var _ds, _dc, _tip;
+                    if(_hasData && _dataTarget) {
+                        _ds  = '✅ DPM=R'+viewDPM+' confirmed as winner root ('+_dataTarget.pct+'% on '+viewResults.length+' games)';
+                        _dc  = '#10b981';
+                        _tip = 'The days DPM value (R'+viewDPM+') appeared in the winner column at '+_dataTarget.pct+'% — actual data overrides the default assumption. This day was vibrational aligned.';
+                    } else if(_hasData && _dataLoser) {
+                        _ds  = '⚠️ DPM=R'+viewDPM+' tracked as loser root ('+_dataLoser.pct+'%W on '+viewResults.length+' games)';
+                        _dc  = '#f59e0b';
+                        _tip = 'The days DPM value (R'+viewDPM+') appeared in the loser column at '+_dataLoser.pct+'% win rate — trap matrix was active that day.';
+                    } else if(_hasData) {
+                        _ds  = '— DPM=R'+viewDPM+' was neutral on this date (no clear W/L bias)';
+                        _dc  = '#4a5568';
+                        _tip = 'The days DPM value (R'+viewDPM+') showed no strong winner or loser bias in the actual game data.';
+                    } else {
+                        // Not enough data — show theoretical default with clear caveat
+                        var _theory = [7,1,3].indexOf(viewDPM)!==-1 ? 'theoretical target root' : [4,5].indexOf(viewDPM)!==-1 ? 'theoretical loser root (default assumption)' : 'neutral by default assumption';
+                        var _tCol   = [7,1,3].indexOf(viewDPM)!==-1 ? '#4a5568' : [4,5].indexOf(viewDPM)!==-1 ? '#4a5568' : '#4a5568';
+                        _ds  = '— DPM=R'+viewDPM+' ('+_theory+' · need 10+ games to confirm)';
+                        _dc  = '#4a5568';
+                        _tip = 'Not enough games tracked on this date to confirm. Default assumption shown — actual data may differ.';
+                    }
+                    h += '<span style="font-size:10px;color:'+_dc+';font-weight:700;cursor:help;" title="'+_tip+'">'+_ds+'</span>';
+                }
+                h += '</div></div>';
+            }
+
+            h += '<p style="color:#8b92a7;font-size:11px;margin-bottom:16px;">Mascot ordinal root computed for every winner and loser. Matrix shows which roots dominated on this date. '+(isToday?'Remaining matchups projection shown below.':'Historical view — all results final.')+'</p>';
+
+            if(viewResults.length === 0){
+                h += '<div style="background:#0f1420;border:1px solid #2a3142;border-radius:8px;padding:24px;text-align:center;">';
+                h += '<div style="color:#4a5568;margin-bottom:8px;">'+(isToday?'No completed games yet today.':'No tracked games found for '+viewDate+'.')+'</div>';
+                if(sortedDates.filter(function(d){return allDatesWithResults[d];}).length>0) h += '<div style="font-size:10px;color:#2a3142;">Select another date using the picker above.</div>';
+                h += '</div>';
             } else {
 
-                // ── Matrix: Root rows, W/L columns ──
+                // Root W/L table
                 h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;margin-bottom:16px;">';
-                h += '<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:10px;" title="Each row = one root number (R1-R9). For each root, the matrix shows how many of today\'s winners had that dominant mascot root vs how many losers had it. Win% = that root\'s winner rate today.">Root W/L Matrix — Today\'s Dominant Mascot Roots</div>';
+                h += '<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:10px;">Root W/L Matrix \u00b7 '+(isToday?'Today':''+viewDate)+'</div>';
                 h += '<div style="overflow-x:auto;">';
                 h += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
                 h += '<thead><tr style="border-bottom:1px solid #1a2535;">';
-                h += '<th style="padding:6px 10px;text-align:left;color:#4a5568;font-weight:700;" title="Root number: digital root of team\'s mascot word (ordinal cipher)">Root</th>';
-                h += '<th style="padding:6px 10px;text-align:center;color:#10b981;font-weight:700;" title="Number of today\'s winners whose mascot root = this value">W (Winners)</th>';
-                h += '<th style="padding:6px 10px;text-align:center;color:#ef4444;font-weight:700;" title="Number of today\'s losers whose mascot root = this value">L (Losers)</th>';
-                h += '<th style="padding:6px 10px;text-align:center;color:#3b82f6;font-weight:700;" title="Win% = winners with this root / (winners + losers with this root). ≥60% = target root today. ≤35% = loser root today.">Win%</th>';
-                h += '<th style="padding:6px 10px;text-align:left;color:#4a5568;font-weight:700;" title="Visual bar showing win rate. Longer green = more winner bias. Longer red = more loser bias.">Signal</th>';
-                h += '<th style="padding:6px 10px;text-align:left;color:#4a5568;font-weight:700;" title="Whether this root is a confirmed target, confirmed loser, or neutral based on today\'s data">Today\'s Classification</th>';
+                h += '<th style="padding:6px 10px;text-align:left;color:#4a5568;font-weight:700;" title="Digital root of teams mascot word via ordinal cipher">Root</th>';
+                h += '<th style="padding:6px 10px;text-align:center;color:#10b981;font-weight:700;" title="Winners whose dominant mascot root = this value">W</th>';
+                h += '<th style="padding:6px 10px;text-align:center;color:#ef4444;font-weight:700;" title="Losers whose dominant mascot root = this value">L</th>';
+                h += '<th style="padding:6px 10px;text-align:center;color:#3b82f6;font-weight:700;" title="Win rate for this root. >=60% = target. <=35% = loser.">Win%</th>';
+                h += '<th style="padding:6px 10px;text-align:left;color:#4a5568;font-weight:700;">Signal</th>';
+                h += '<th style="padding:6px 10px;text-align:left;color:#4a5568;font-weight:700;">Classification</th>';
                 h += '</tr></thead><tbody>';
 
                 DNA_ROOTS.forEach(function(r){
-                    var w = winRoots[r]||0, l = lossRoots[r]||0, tot = w+l;
-                    if(tot===0 && totalWins<5) {
-                        // Still show all rows when data is sparse
-                    }
+                    var w=winRoots[r]||0, l=lossRoots[r]||0, tot=w+l;
                     var wpct = tot>0 ? Math.round(w/tot*100) : null;
                     var baseCol = DNA_COLORS[r];
-                    var isTarget  = wpct!==null && wpct>=60;
-                    var isLoser   = wpct!==null && wpct<=35;
-                    var rowBg     = isTarget?'rgba(167,139,250,0.04)':isLoser?'rgba(239,68,68,0.04)':'transparent';
+                    var isTarget = wpct!==null && wpct>=60;
+                    var isLoser  = wpct!==null && wpct<=35;
+                    var rowBg    = isTarget?'rgba(167,139,250,0.04)':isLoser?'rgba(239,68,68,0.04)':'transparent';
+                    var _eT = confirmedTargets.find(function(x){return x.r===r;});
+                    var _eL = confirmedLosers.find(function(x){return x.r===r;});
+                    var _tier = _eT ? _eT.tier : _eL ? _eL.tier : null;
+                    var _conf = _eT ? _eT.conf : _eL ? _eL.conf : null;
+                    var _tSuffix = _tier==='CONFIRMED' ? '' : _tier==='PROBABLE' ? ' · probable' : ' · low sample';
+                    var _tOpacity = _tier==='CONFIRMED' ? '' : 'opacity:0.78;';
+                    var _tTip = _tier==='CONFIRMED' ? 'Strong signal — sufficient sample to trust.' : _tier==='PROBABLE' ? 'Building confidence — likely signal, needs more games.' : 'Low sample — win rate may shift. Confidence score: '+_conf+'.';
                     var classLabel = wpct===null ? '<span style="color:#2a3142;">No data</span>'
-                        : isTarget  ? '<span style="color:#a78bfa;font-weight:800;cursor:help;" title="'+ROOT_TIPS[r]+' Today confirmed: '+w+' winners vs '+l+' losers ('+wpct+'%)">✅ TARGET ('+wpct+'%)</span>'
-                        : isLoser   ? '<span style="color:#ef4444;font-weight:800;cursor:help;" title="'+ROOT_TIPS[r]+' Today confirmed loser: only '+w+' winners vs '+l+' losers ('+wpct+'%)">⚠️ LOSER ('+wpct+'%)</span>'
-                        : '<span style="color:#4a5568;cursor:help;" title="'+ROOT_TIPS[r]+' Today: '+w+' wins, '+l+' losses — no clear bias.">— neutral</span>';
-                    var barW = wpct!==null ? wpct : 0;
+                        : isTarget ? '<span style="color:#a78bfa;font-weight:800;cursor:help;'+_tOpacity+'" title="'+ROOT_TIPS[r]+' '+w+'W vs '+l+'L ('+wpct+'%). '+_tTip+' Confidence score '+_conf+' (score weighs volume — R7 at 80%×15g outranks R4 at 86%×7g).">✅ TARGET ('+wpct+'%)'+_tSuffix+'</span>'
+                        : isLoser  ? '<span style="color:#ef4444;font-weight:800;cursor:help;'+_tOpacity+'" title="'+ROOT_TIPS[r]+' '+w+'W vs '+l+'L ('+wpct+'%W). '+_tTip+' Confidence score '+_conf+'.">⚠️ LOSER ('+wpct+'%)'+_tSuffix+'</span>'
+                        : '<span style="color:#4a5568;cursor:help;" title="'+ROOT_TIPS[r]+' '+w+'W, '+l+'L — no strong bias.">\u2014 neutral</span>';
+                    var barW   = wpct!==null ? wpct : 0;
                     var barCol = isTarget?'#a78bfa':isLoser?'#ef4444':'#3b82f6';
-
                     h += '<tr style="border-bottom:1px solid #0f1520;background:'+rowBg+';">';
-                    h += '<td style="padding:6px 10px;font-weight:800;color:'+baseCol+';" title="'+ROOT_TIPS[r]+'">R'+r+'</td>';
+                    h += '<td style="padding:6px 10px;font-weight:800;color:'+baseCol+';cursor:help;" title="'+ROOT_TIPS[r]+'">R'+r+'</td>';
                     h += '<td style="padding:6px 10px;text-align:center;color:#10b981;font-weight:'+(w>0?700:400)+';">'+w+'</td>';
                     h += '<td style="padding:6px 10px;text-align:center;color:#ef4444;font-weight:'+(l>0?700:400)+';">'+l+'</td>';
-                    h += '<td style="padding:6px 10px;text-align:center;font-weight:700;color:'+(wpct===null?'#2a3142':barCol)+';">'+(wpct===null?'—':wpct+'%')+'</td>';
+                    h += '<td style="padding:6px 10px;text-align:center;font-weight:700;color:'+(wpct===null?'#2a3142':barCol)+';">'+(wpct===null?'\u2014':wpct+'%')+'</td>';
                     h += '<td style="padding:6px 10px;">';
                     if(wpct!==null){
                         h += '<div style="display:flex;align-items:center;gap:4px;">';
                         h += '<div style="width:80px;height:6px;background:#1a2535;border-radius:3px;">';
                         h += '<div style="height:100%;width:'+barW+'%;background:'+barCol+';border-radius:3px;"></div></div>';
-                        h += '<span style="font-size:9px;color:#4a5568;">'+w+'W/'+l+'L</span>';
-                        h += '</div>';
+                        h += '<span style="font-size:9px;color:#4a5568;">'+w+'W/'+l+'L</span></div>';
                     }
                     h += '</td>';
                     h += '<td style="padding:6px 10px;">'+classLabel+'</td>';
@@ -15337,190 +15794,215 @@ function _showBracketTable() {
 
                 // Summary row
                 h += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #1a2535;display:flex;gap:16px;flex-wrap:wrap;">';
-                h += '<span style="font-size:10px;color:#4a5568;">Games analysed: '+todayResults.length+'</span>';
-                if(confirmedTargets.length){
-                    h += '<span style="font-size:10px;color:#a78bfa;" title="Roots appearing in ≥60% of today\'s winners. Use these to project remaining matchups.">✅ Today\'s target roots: '+confirmedTargets.map(function(x){return 'R'+x.r+'('+x.pct+'%)';}).join(', ')+'</span>';
-                }
-                if(confirmedLosers.length){
-                    h += '<span style="font-size:10px;color:#ef4444;" title="Roots appearing in ≤35% of today\'s winners (i.e. mostly in losers). Teams with these roots are at higher risk.">⚠️ Loser roots: '+confirmedLosers.map(function(x){return 'R'+x.r+'('+x.pct+'%W)';}).join(', ')+'</span>';
+                h += '<span style="font-size:10px;color:#4a5568;">Games: '+viewResults.length+'</span>';
+                if(confirmedTargets.length) h += '<span style="font-size:10px;color:#a78bfa;">✅ Target roots: '+confirmedTargets.map(function(x){return 'R'+x.r+'('+x.pct+'%'+(x.tier==='CONFIRMED'?'':'·'+x.tier.toLowerCase().charAt(0)+x.tier.toLowerCase().slice(1))+'·'+x.w+'+'+x.l+'g)';}).join(', ')+'</span>';
+                if(confirmedLosers.length)  h += '<span style="font-size:10px;color:#ef4444;">⚠️ Loser roots: '+confirmedLosers.map(function(x){return 'R'+x.r+'('+x.pct+'%W'+(x.tier==='CONFIRMED'?'':'·'+x.tier.toLowerCase().charAt(0)+x.tier.toLowerCase().slice(1))+'·'+x.w+'+'+x.l+'g)';}).join(', ')+'</span>';
+                if(viewDPM){
+                    var _dTi=confirmedTargets.find(function(x){return x.r===viewDPM;});
+                    var _dLo=confirmedLosers.find(function(x){return x.r===viewDPM;});
+                    if(_dTi)  h += '<span style="font-size:10px;color:#10b981;font-weight:700;">⚡ DPM=R'+viewDPM+' confirmed as winner root</span>';
+                    else if(_dLo) h += '<span style="font-size:10px;color:#f59e0b;font-weight:700;">⚠️ DPM=R'+viewDPM+' tracked as loser root</span>';
                 }
                 h += '</div>';
                 h += '</div>'; // matrix card
 
-                // ── Variation breakdown table ──
+                // Variation breakdown
                 h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;margin-bottom:16px;">';
-                h += '<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:8px;" title="Breaks down W/L root patterns by which name variation is used: full team name, city only, mascot word only, or initials abbreviation. Helps identify which variation type is most predictive per sport.">Variation Breakdown — Which name type drives the pattern?</div>';
+                h += '<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:8px;" title="Breaks down W/L root patterns by name variation type.">Variation Breakdown</div>';
                 h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">';
                 ['full','city','mascot','abbrev'].forEach(function(vk){
-                    var vLabel = {full:'Full Name',city:'City',mascot:'Mascot',abbrev:'Abbrev'}[vk];
-                    var vTip = {full:'Full team name ordinal root (e.g. "Memphis Grizzlies")',city:'City name only (e.g. "Memphis")',mascot:'Mascot word only (e.g. "Grizzlies") — historically strongest for CBB',abbrev:'Initials abbreviation (e.g. "MG") — historically strongest for MMA'}[vk];
+                    var vLabel={full:'Full Name',city:'City',mascot:'Mascot',abbrev:'Abbrev'}[vk];
+                    var vTip={full:'Full team name ordinal root',city:'City/first part only',mascot:'Mascot word — strongest for CBB',abbrev:'Initials — strongest for MMA/Tennis'}[vk];
                     h += '<div style="background:#080c12;border:1px solid #1a2030;border-radius:6px;padding:8px;" title="'+vTip+'">';
                     h += '<div style="font-size:9px;font-weight:700;color:#4a5568;text-transform:uppercase;margin-bottom:6px;">'+vLabel+'</div>';
                     var topW=[], topL=[];
                     DNA_ROOTS.forEach(function(r){
                         var w=varWinRoots[vk][r]||0, l=varLossRoots[vk][r]||0, tot=w+l;
-                        if(tot>0) { var pct=Math.round(w/tot*100); if(pct>=60)topW.push({r:r,pct:pct}); else if(pct<=35)topL.push({r:r,pct:pct}); }
+                        if(tot>0){ var pct=Math.round(w/tot*100); if(pct>=60) topW.push({r:r,pct:pct}); else if(pct<=35) topL.push({r:r,pct:pct}); }
                     });
                     topW.sort(function(a,b){return b.pct-a.pct;});
                     topL.sort(function(a,b){return a.pct-b.pct;});
-                    if(topW.length) h+='<div style="font-size:9px;color:#a78bfa;margin-bottom:2px;" title="Roots that appeared in ≥60% of winners via the '+vLabel+' variation today">✅ '+topW.map(function(x){return 'R'+x.r+' '+x.pct+'%';}).join(' ')+'</div>';
-                    if(topL.length) h+='<div style="font-size:9px;color:#ef4444;" title="Roots that appeared in ≤35% of winners (mostly losers) via the '+vLabel+' variation today">⚠️ '+topL.map(function(x){return 'R'+x.r+' '+x.pct+'%';}).join(' ')+'</div>';
-                    if(!topW.length&&!topL.length) h+='<div style="font-size:9px;color:#2a3142;">No clear pattern</div>';
+                    if(topW.length) h += '<div style="font-size:9px;color:#a78bfa;">✅ '+topW.map(function(x){return 'R'+x.r+' '+x.pct+'%';}).join(' ')+'</div>';
+                    if(topL.length) h += '<div style="font-size:9px;color:#ef4444;">⚠️ '+topL.map(function(x){return 'R'+x.r+' '+x.pct+'%';}).join(' ')+'</div>';
+                    if(!topW.length&&!topL.length) h += '<div style="font-size:9px;color:#2a3142;">No clear pattern</div>';
                     h += '</div>';
                 });
-                h += '</div></div>';
-            }
+                h += '</div></div>'; // variation breakdown
 
-            // ── Remaining Matchups Projection ──
-            h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;margin-bottom:16px;">';
-            h += '<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:4px;" title="For each pending/unplayed game tracked in the accuracy system: shows each team\'s mascot root, classifies it against today\'s W/L matrix, and projects the winner based purely on root alignment. Complementary signals (DNA pick, V4, V2, Vegas, trap) are shown alongside.">Remaining Matchups — Root Alignment Projection</div>';
-            h += '<p style="font-size:10px;color:#4a5568;margin-bottom:10px;">Based on today\'s root matrix. Purely observational — use alongside all other signals.</p>';
+                // ── Calendar VW Match Report ──
+                // For each calendar: count how many of its 4 VW values (DPM/UN/GD/LD)
+                // appear in the confirmed winning roots for this date.
+                // This tells us which calendar's vibrational weather best predicted reality.
+                if(viewDateVW) {
+                    var CAL_KEYS_CM  = ['gregorian','ancient_roman','unc','ifc','ethiopian','pure_sol','sol','future_gregorian_plus2','gemini_rolling'];
+                    var CAL_SHORT_CM = {gregorian:'Greg',ancient_roman:'AncR',unc:'UNC',ifc:'IFC',ethiopian:'Eth',pure_sol:'PureSOL',sol:'SOL',future_gregorian_plus2:'FutG',gemini_rolling:'G-Roll'};
+                    var CAL_FULL_CM  = {gregorian:'Gregorian',ancient_roman:'Ancient Roman',unc:'UNC',ifc:'IFC',ethiopian:'Ethiopian',pure_sol:'Pure SOL',sol:'SOL',future_gregorian_plus2:'Future Gregorian +2',gemini_rolling:'G-Roll (Gemini)'};
+                    var winningRoots = confirmedTargets.map(function(x){return x.r;});
 
-            // Also grab live gameWPs for pending matchups
-            var targetRootsToday = confirmedTargets.map(function(x){return x.r;});
-            var loserRootsToday  = confirmedLosers.map(function(x){return x.r;});
-            // Fall back to system defaults if no data yet
-            if(targetRootsToday.length===0) targetRootsToday = [7,1,3];
-            if(loserRootsToday.length===0)  loserRootsToday  = [4,5];
-
-            // Get pending games from accuracy tracker predictions
-            var upcomingGames = Array.from(accuracyTracker.predictions.values())
-                .filter(function(g){ return g.status==='PENDING' && !g.isTapeMatch; })
-                .sort(function(a,b){ return (a.gameDate||0)-(b.gameDate||0); });
-
-            // Also pull from gameWPs (live sidebar data) for sport context
-            var gwPending = [];
-            if(window.gameWPs){
-                window.gameWPs.forEach(function(gw,gid){
-                    if(!gw.wp || gw.wp===null) return;
-                    var acc = accuracyTracker.predictions.get(gid);
-                    if(acc && acc.status==='PENDING') return; // already in list
-                    // Include if in sidebar (sport tab open)
-                    if(gw.data && !gw.data.isFinal){
-                        gwPending.push({
-                            gameId: gid,
-                            homeTeam: gw.data.homeTeam||'',
-                            awayTeam: gw.data.awayTeam||'',
-                            sport: gw.sport||'',
-                            predictedHomeWP: Math.round((gw.wp||0.5)*100),
-                            status:'PENDING'
+                    var calScores = [];
+                    CAL_KEYS_CM.forEach(function(ck){
+                        var vw = viewDateVW[ck];
+                        if(!vw) return;
+                        var fields = [{k:'DPM',v:vw.dpm},{k:'UN',v:vw.un},{k:'GD',v:vw.gd},{k:'LD',v:vw.ld}];
+                        var hits=[], misses=[];
+                        fields.forEach(function(f){
+                            if(f.v && winningRoots.indexOf(f.v)!==-1) hits.push(f.k+'=R'+f.v);
+                            else if(f.v) misses.push(f.k+'=R'+f.v);
                         });
-                    }
-                });
-            }
-
-            var allPending = upcomingGames.concat(gwPending.filter(function(gw){
-                return !upcomingGames.find(function(ug){ return ug.homeTeam===gw.homeTeam&&ug.awayTeam===gw.awayTeam; });
-            }));
-
-            if(allPending.length===0){
-                h += '<div style="font-size:11px;color:#4a5568;padding:12px;text-align:center;">No pending tracked games found. Open a sport tab and view games to populate this.</div>';
-            } else {
-                // Group by sport
-                var bySport = {};
-                allPending.forEach(function(g){
-                    var sp = (g.sport||'?').toUpperCase();
-                    if(!bySport[sp]) bySport[sp]=[];
-                    bySport[sp].push(g);
-                });
-
-                Object.keys(bySport).sort().forEach(function(sp){
-                    h += '<div style="margin-bottom:12px;">';
-                    h += '<div style="font-size:10px;font-weight:800;color:#4a5568;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">'+sp+'</div>';
-
-                    bySport[sp].forEach(function(g){
-                        var homeRoot = getMascotRoot(g.homeTeam||'');
-                        var awayRoot = getMascotRoot(g.awayTeam||'');
-                        var homeIsTarget = homeRoot && targetRootsToday.indexOf(homeRoot)!==-1;
-                        var awayIsTarget = awayRoot && targetRootsToday.indexOf(awayRoot)!==-1;
-                        var homeIsLoser  = homeRoot && loserRootsToday.indexOf(homeRoot)!==-1;
-                        var awayIsLoser  = awayRoot && loserRootsToday.indexOf(awayRoot)!==-1;
-
-                        // Root-based projection
-                        var rootProj = null, rootProjConf = 'UNCLEAR';
-                        if(homeIsTarget && !awayIsTarget) { rootProj='home'; rootProjConf='STRONG'; }
-                        else if(awayIsTarget && !homeIsTarget) { rootProj='away'; rootProjConf='STRONG'; }
-                        else if(homeIsLoser && !awayIsLoser) { rootProj='away'; rootProjConf='MODERATE'; }
-                        else if(awayIsLoser && !homeIsLoser) { rootProj='home'; rootProjConf='MODERATE'; }
-                        else if(homeIsTarget && awayIsTarget) { rootProj=null; rootProjConf='BOTH HIT'; }
-                        else { rootProj=null; rootProjConf='NEUTRAL'; }
-
-                        var projectedWinner = rootProj==='home' ? g.homeTeam : rootProj==='away' ? g.awayTeam : null;
-
-                        // Collect complementary signals
-                        var signals = [];
-                        var v4W = g.v4Winner || (g.predictedHomeWP>=50 ? g.homeTeam : g.awayTeam);
-                        var v2W = g.predictedHomeWP>=50 ? g.homeTeam : g.awayTeam;
-                        var dnaW = g.skipPatternPick || null;
-
-                        // Alignment check
-                        var allAgree = projectedWinner && v4W===projectedWinner && v2W===projectedWinner;
-                        var v4Agrees = projectedWinner && v4W===projectedWinner;
-                        var v2Agrees = projectedWinner && v2W===projectedWinner;
-                        var dnaAgrees = projectedWinner && dnaW===projectedWinner;
-
-                        // Row color
-                        var rowBorder = rootProjConf==='STRONG'?'#a78bfa':rootProjConf==='MODERATE'?'#10b981':'#2a3142';
-                        var rowBg = rootProjConf==='STRONG'?'rgba(167,139,250,0.04)':rootProjConf==='MODERATE'?'rgba(16,185,129,0.04)':'transparent';
-
-                        h += '<div style="background:#080c12;border:1px solid #1a2535;border-left:3px solid '+rowBorder+';border-radius:0 6px 6px 0;padding:8px 12px;margin-bottom:5px;background:'+rowBg+';">';
-                        h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">';
-
-                        // Left: teams
-                        h += '<div>';
-                        h += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">';
-                        // Away team
-                        var awayCol = awayIsTarget?'#a78bfa':awayIsLoser?'#ef4444':'#8b92a7';
-                        h += '<span style="font-size:12px;font-weight:800;color:'+(rootProj==='away'?'#a78bfa':'#e8e8e8')+';" title="Mascot: '+g.awayTeam.split(' ').pop()+' → R'+(awayRoot||'?')+'. '+(awayIsTarget?'TARGET ROOT — strong winner alignment today.':awayIsLoser?'LOSER ROOT — underperforms in winners today.':'Neutral root.')+'">'+(g.awayTeam||'').split(' ').pop()+'</span>';
-                        h += '<span style="font-size:9px;color:'+awayCol+';background:'+awayCol+'22;border:1px solid '+awayCol+'44;border-radius:3px;padding:1px 4px;cursor:help;" title="Mascot ordinal root for '+(g.awayTeam||'')+'. '+(awayIsTarget?'TARGET root today (R'+awayRoot+').':awayIsLoser?'LOSER root today (R'+awayRoot+').':'Neutral root.')+'">R'+(awayRoot||'?')+'</span>';
-                        if(awayIsTarget) h += '<span style="font-size:8px;color:#a78bfa;cursor:help;" title="Mascot root R'+awayRoot+' is a confirmed target root in today\'s W/L data — team with this root more likely to win.">✅</span>';
-                        if(awayIsLoser)  h += '<span style="font-size:8px;color:#ef4444;cursor:help;" title="Mascot root R'+awayRoot+' is a confirmed loser root in today\'s W/L data — team with this root at higher risk of losing.">⚠️</span>';
-                        h += '<span style="font-size:10px;color:#4a5568;">@</span>';
-                        // Home team
-                        var homeCol = homeIsTarget?'#a78bfa':homeIsLoser?'#ef4444':'#8b92a7';
-                        h += '<span style="font-size:12px;font-weight:800;color:'+(rootProj==='home'?'#a78bfa':'#e8e8e8')+';" title="Mascot: '+g.homeTeam.split(' ').pop()+' → R'+(homeRoot||'?')+'. '+(homeIsTarget?'TARGET ROOT — strong winner alignment today.':homeIsLoser?'LOSER ROOT — underperforms in winners today.':'Neutral root.')+'">'+(g.homeTeam||'').split(' ').pop()+'</span>';
-                        h += '<span style="font-size:9px;color:'+homeCol+';background:'+homeCol+'22;border:1px solid '+homeCol+'44;border-radius:3px;padding:1px 4px;cursor:help;" title="Mascot ordinal root for '+(g.homeTeam||'')+'. '+(homeIsTarget?'TARGET root today (R'+homeRoot+').':homeIsLoser?'LOSER root today (R'+homeRoot+').':'Neutral root.')+'">R'+(homeRoot||'?')+'</span>';
-                        if(homeIsTarget) h += '<span style="font-size:8px;color:#a78bfa;cursor:help;" title="Mascot root R'+homeRoot+' is a confirmed target root in today\'s W/L data.">✅</span>';
-                        if(homeIsLoser)  h += '<span style="font-size:8px;color:#ef4444;cursor:help;" title="Mascot root R'+homeRoot+' is a confirmed loser root in today\'s W/L data.">⚠️</span>';
-                        h += '</div>';
-
-                        // Complementary badges
-                        h += '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
-                        if(v4W) h+='<span style="font-size:9px;color:#a78bfa;background:#a78bfa18;border:1px solid #a78bfa44;border-radius:3px;padding:1px 5px;cursor:help;" title="V4 Chronos prediction: '+v4W.split(' ').pop()+'">V4: '+v4W.split(' ').pop()+'</span>';
-                        if(v2W) h+='<span style="font-size:9px;color:#3b82f6;background:#3b82f618;border:1px solid #3b82f644;border-radius:3px;padding:1px 5px;cursor:help;" title="V2 Statistical model prediction: '+v2W.split(' ').pop()+'">V2: '+v2W.split(' ').pop()+'</span>';
-                        if(dnaW) h+='<span style="font-size:9px;color:#a78bfa;background:#a78bfa18;border:1px solid #a78bfa44;border-radius:3px;padding:1px 5px;cursor:help;" title="DNA Skip-Pattern sequence pick: '+dnaW.split(' ').pop()+'">🧬 DNA: '+dnaW.split(' ').pop()+'</span>';
-                        if(g.allThreeLock) h+='<span style="font-size:9px;color:#10b981;background:#10b98118;border:1px solid #10b98144;border-radius:3px;padding:1px 5px;cursor:help;" title="ALL-3 LOCK: V4 Chronos, V2 Statistical, AND Vegas spread all agree on the same winner. Strongest signal.">🔒 ALL-3 LOCK</span>';
-                        if(g.trapTier===1) h+='<span style="font-size:9px;color:#ef4444;background:#ef444418;border:1px solid #ef444444;border-radius:3px;padding:1px 5px;cursor:help;" title="VOID LOCK (Trap Tier 1): Both name variations trigger the trap gate AND 2+ resonance calendars are in trap mode. Highest upset risk — favourite may lose.">☠️ VOID LOCK</span>';
-                        else if(g.trapTier===2) h+='<span style="font-size:9px;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 5px;cursor:help;" title="TRAP T2: Both variations flagged + 1 resonance calendar in trap mode. Elevated upset risk.">⚡ TRAP T2</span>';
-                        if(g.upsetAlert||g.isUpset) h+='<span style="font-size:9px;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 5px;cursor:help;" title="UPSET ALERT: Prediction engines pick the Vegas underdog. Market disagrees with the model.">⚡ UPSET</span>';
-                        h += '</div>';
-                        h += '</div>'; // left
-
-                        // Right: root projection verdict
-                        h += '<div style="text-align:right;">';
-                        if(projectedWinner){
-                            var projCol = rootProjConf==='STRONG'?'#a78bfa':'#10b981';
-                            var _projTip = 'Root Matrix Projection: '+(projectedWinner.split(' ').pop())+' wins based on todays W/L root pattern. Confidence: '+rootProjConf+'. Observational — cross-reference with V4/V2/DNA/Vegas.';
-                            var _pwShort = projectedWinner.split(' ').pop();
-                            h += '<div style="font-size:10px;font-weight:800;color:'+projCol+';cursor:help;" title="'+_projTip+'">'+_pwShort+'</div>';
-                            h += '<div style="font-size:8px;color:'+projCol+';opacity:0.7;">'+rootProjConf+' ROOT EDGE</div>';
-                            if(allAgree) h+='<div style="font-size:8px;color:#10b981;margin-top:2px;cursor:help;" title="All signals (Root Matrix, V4, V2, DNA) agree on this winner.">✅ ALL AGREE</div>';
-                            else if(v4Agrees&&v2Agrees) h+='<div style="font-size:8px;color:#3b82f6;margin-top:2px;cursor:help;" title="Root Matrix projection matches V4 and V2 picks.">📊 V4+V2 CONFIRM</div>';
-                            else if(!v4Agrees&&!v2Agrees&&projectedWinner) h+='<div style="font-size:8px;color:#f59e0b;margin-top:2px;cursor:help;" title="Root Matrix projects '+_pwShort+' but V4/V2 disagree. Potential divergence — treat with caution.">⚠️ DIVERGES V4/V2</div>';
-                        } else {
-                            var neutralMsg = rootProjConf==='BOTH HIT' ? '🤝 BOTH TARGET' : '— NEUTRAL';
-                            var neutralTip = rootProjConf==='BOTH HIT' ? 'Both teams have target roots today — no root-based edge. Use other signals.' : 'Neither team has a clearly favoured or disfavoured root today. No root edge.';
-                            h += '<div style="font-size:10px;color:#4a5568;cursor:help;" title="'+neutralTip+'">'+neutralMsg+'</div>';
-                        }
-                        h += '</div>'; // right
-                        h += '</div>'; // flex row
-                        h += '</div>'; // game row
+                        calScores.push({
+                            key: ck,
+                            short: CAL_SHORT_CM[ck]||ck,
+                            full:  CAL_FULL_CM[ck]||ck,
+                            hits:  hits,
+                            misses: misses,
+                            score: hits.length,
+                            total: fields.filter(function(f){return !!f.v;}).length,
+                            dpm: vw.dpm, un: vw.un, gd: vw.gd, ld: vw.ld
+                        });
                     });
-                    h += '</div>'; // sport group
-                });
-            }
+                    calScores.sort(function(a,b){ return b.score-a.score || a.key.localeCompare(b.key); });
 
-            h += '</div>'; // remaining matchups card
+                    var bestScore = calScores.length ? calScores[0].score : 0;
+                    var bestCals  = calScores.filter(function(c){return c.score===bestScore;});
+
+                    h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;margin-bottom:16px;">';
+                    h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">';
+                    h += '<div style="font-size:11px;font-weight:800;color:#fff;" title="For each calendar system, counts how many of its 4 VW values (DPM, UN, GD, LD) matched the actual winning root numbers on this date. The calendar with the most matches was the best vibrational predictor for the day.">📅 Calendar VW Match Report · '+viewDate+'</div>';
+                    if(winningRoots.length) {
+                        h += '<span style="font-size:10px;color:#4a5568;">Winning roots: '+winningRoots.map(function(r){return 'R'+r;}).join(', ')+'</span>';
+                    }
+                    h += '</div>';
+                    h += '<p style="font-size:10px;color:#4a5568;margin-bottom:10px;margin-top:0;">Which calendar\'s DPM/UN/GD/LD values overlapped most with the actual winning roots. Best match = most predictive calendar for this day.</p>';
+
+                    // Best calendar callout
+                    if(bestScore > 0) {
+                        var bestStr = bestCals.map(function(c){return c.full+' ('+c.hits.join(', ')+')';}).join(' · ');
+                        var bestCol = bestScore>=3 ? '#f59e0b' : bestScore===2 ? '#10b981' : '#4a5568';
+                        var bestBadge = bestScore>=3 ? '🏆' : bestScore===2 ? '✅' : '—';
+                        h += '<div style="background:'+(bestScore>=3?'#f59e0b18':'#10b98118')+';border:1px solid '+(bestScore>=3?'#f59e0b44':'#10b98144')+';border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:11px;">';
+                        h += bestBadge+' <strong style="color:'+bestCol+';">Best match: '+bestStr+'</strong>';
+                        h += ' <span style="color:#4a5568;font-size:10px;">— '+bestScore+' of 4 VW values hit winning roots</span>';
+                        h += '</div>';
+                    } else {
+                        h += '<div style="font-size:10px;color:#4a5568;padding:6px 0;margin-bottom:10px;">No calendar had a VW value match a confirmed winning root on this date.</div>';
+                    }
+
+                    // Calendar grid
+                    h += '<div style="overflow-x:auto;">';
+                    h += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
+                    h += '<thead><tr style="border-bottom:1px solid #1a2535;">';
+                    h += '<th style="padding:5px 8px;text-align:left;color:#4a5568;font-weight:700;">Calendar</th>';
+                    h += '<th style="padding:5px 8px;text-align:center;color:#f59e0b;font-weight:700;" title="Day Power Modifier">DPM</th>';
+                    h += '<th style="padding:5px 8px;text-align:center;color:#3b82f6;font-weight:700;" title="Universal Number">UN</th>';
+                    h += '<th style="padding:5px 8px;text-align:center;color:#10b981;font-weight:700;" title="Grand Day">GD</th>';
+                    h += '<th style="padding:5px 8px;text-align:center;color:#8b5cf6;font-weight:700;" title="Lucky Day">LD</th>';
+                    h += '<th style="padding:5px 8px;text-align:center;color:#fff;font-weight:700;" title="Number of VW values that matched a confirmed winning root">Hits</th>';
+                    h += '<th style="padding:5px 8px;text-align:left;color:#4a5568;font-weight:700;">Matched values</th>';
+                    h += '</tr></thead><tbody>';
+
+                    calScores.forEach(function(c){
+                        var isBest = c.score===bestScore && bestScore>0;
+                        var rowBg  = isBest ? 'rgba(245,158,11,0.04)' : 'transparent';
+                        var scoreCol = c.score>=3?'#f59e0b':c.score===2?'#10b981':c.score===1?'#3b82f6':'#2a3142';
+                        function cellStyle(val) {
+                            var isHit = winningRoots.indexOf(val)!==-1;
+                            return 'padding:5px 8px;text-align:center;font-weight:'+(isHit?800:400)+';color:'+(isHit?'#f59e0b':'#4a5568')+';background:'+(isHit?'rgba(245,158,11,0.08)':'transparent')+';';
+                        }
+                        h += '<tr style="border-bottom:1px solid #0f1520;background:'+rowBg+';">';
+                        h += '<td style="padding:5px 8px;font-weight:'+(isBest?800:400)+';color:'+(isBest?'#f59e0b':'#8b92a7')+';white-space:nowrap;">'+(isBest?'🏆 ':'')+c.full+'</td>';
+                        h += '<td style="'+cellStyle(c.dpm)+'">R'+(c.dpm||'?')+'</td>';
+                        h += '<td style="'+cellStyle(c.un)+'">R'+(c.un||'?')+'</td>';
+                        h += '<td style="'+cellStyle(c.gd)+'">R'+(c.gd||'?')+'</td>';
+                        h += '<td style="'+cellStyle(c.ld)+'">R'+(c.ld||'?')+'</td>';
+                        h += '<td style="padding:5px 8px;text-align:center;font-weight:800;color:'+scoreCol+';">'+c.score+'/'+c.total+'</td>';
+                        h += '<td style="padding:5px 8px;font-size:10px;color:'+(c.hits.length?'#10b981':'#2a3142')+';">'+(c.hits.length?c.hits.join(', '):'—')+'</td>';
+                        h += '</tr>';
+                    });
+                    h += '</tbody></table></div>';
+                    h += '</div>'; // calendar match report
+
+                } // end if viewDateVW
+
+            } // end if viewResults.length > 0
+
+            // Remaining matchups — today only
+            if(isToday) {
+                var targetRootsToday = confirmedTargets.map(function(x){return x.r;});
+                var loserRootsToday  = confirmedLosers.map(function(x){return x.r;});
+                if(targetRootsToday.length===0) targetRootsToday=[7,1,3];
+                if(loserRootsToday.length===0)  loserRootsToday=[4,5];
+
+                var upcomingGames = Array.from(accuracyTracker.predictions.values())
+                    .filter(function(g){ return g.status==='PENDING' && !g.isTapeMatch; })
+                    .sort(function(a,b){ return (a.gameDate||0)-(b.gameDate||0); });
+                var gwPending = [];
+                if(window.gameWPs){
+                    window.gameWPs.forEach(function(gw,gid){
+                        if(!gw.wp||gw.wp===null) return;
+                        var acc=accuracyTracker.predictions.get(gid);
+                        if(acc&&acc.status==='PENDING') return;
+                        if(gw.data&&!gw.data.isFinal) gwPending.push({gameId:gid,homeTeam:gw.data.homeTeam||'',awayTeam:gw.data.awayTeam||'',sport:gw.sport||'',predictedHomeWP:Math.round((gw.wp||0.5)*100),status:'PENDING'});
+                    });
+                }
+                var allPending = upcomingGames.concat(gwPending.filter(function(gw){ return !upcomingGames.find(function(ug){ return ug.homeTeam===gw.homeTeam&&ug.awayTeam===gw.awayTeam; }); }));
+
+                h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;margin-bottom:16px;">';
+                h += '<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:4px;" title="For each pending tracked game: teams mascot root classified against todays W/L matrix. Purely observational.">Remaining Matchups \u2014 Root Alignment Projection</div>';
+                h += '<p style="font-size:10px;color:#4a5568;margin-bottom:10px;">Based on todays root matrix. Observational \u2014 use alongside all other signals.</p>';
+
+                if(allPending.length===0){
+                    h += '<div style="font-size:11px;color:#4a5568;padding:12px;text-align:center;">No pending tracked games found.</div>';
+                } else {
+                    var bySport={};
+                    allPending.forEach(function(g){ var sp=(g.sport||'?').toUpperCase(); if(!bySport[sp]) bySport[sp]=[]; bySport[sp].push(g); });
+                    Object.keys(bySport).sort().forEach(function(sp){
+                        h += '<div style="margin-bottom:12px;">';
+                        h += '<div style="font-size:10px;font-weight:800;color:#4a5568;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">'+sp+'</div>';
+                        bySport[sp].forEach(function(g){
+                            function _mr(n){ var p=n.trim().split(/\s+/),m=p[p.length-1],s=0; m.toUpperCase().replace(/[^A-Z]/g,'').split('').forEach(function(c){s+=c.charCodeAt(0)-64;}); while(s>9) s=String(s).split('').reduce(function(a,d){return a+parseInt(d);},0); return s||null; }
+                            var homeRoot=_mr(g.homeTeam||''), awayRoot=_mr(g.awayTeam||'');
+                            var homeIsTarget=homeRoot&&targetRootsToday.indexOf(homeRoot)!==-1;
+                            var awayIsTarget=awayRoot&&targetRootsToday.indexOf(awayRoot)!==-1;
+                            var homeIsLoser=homeRoot&&loserRootsToday.indexOf(homeRoot)!==-1;
+                            var awayIsLoser=awayRoot&&loserRootsToday.indexOf(awayRoot)!==-1;
+                            var rootProj=null, rootProjConf='NEUTRAL';
+                            if(homeIsTarget&&!awayIsTarget){ rootProj='home'; rootProjConf='STRONG'; }
+                            else if(awayIsTarget&&!homeIsTarget){ rootProj='away'; rootProjConf='STRONG'; }
+                            else if(homeIsLoser&&!awayIsLoser){ rootProj='away'; rootProjConf='MODERATE'; }
+                            else if(awayIsLoser&&!homeIsLoser){ rootProj='home'; rootProjConf='MODERATE'; }
+                            else if(homeIsTarget&&awayIsTarget){ rootProj=null; rootProjConf='BOTH HIT'; }
+                            var projectedWinner = rootProj==='home'?g.homeTeam:rootProj==='away'?g.awayTeam:null;
+                            var rowBorder = rootProjConf==='STRONG'?'#a78bfa':rootProjConf==='MODERATE'?'#10b981':'#2a3142';
+                            h += '<div style="background:#080c12;border:1px solid #1a2535;border-left:3px solid '+rowBorder+';border-radius:0 6px 6px 0;padding:8px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">';
+                            var awayCol=awayIsTarget?'#a78bfa':awayIsLoser?'#ef4444':'#8b92a7';
+                            var homeCol=homeIsTarget?'#a78bfa':homeIsLoser?'#ef4444':'#8b92a7';
+                            h += '<div style="display:flex;gap:8px;align-items:center;">';
+                            h += '<span style="font-size:12px;font-weight:800;color:'+(rootProj==='away'?'#a78bfa':'#e8e8e8')+'">'+(g.awayTeam||'').split(' ').pop()+'</span>';
+                            h += '<span style="font-size:9px;color:'+awayCol+';background:'+awayCol+'22;border:1px solid '+awayCol+'44;border-radius:3px;padding:1px 4px;">R'+(awayRoot||'?')+'</span>';
+                            if(awayIsTarget) h += '<span style="font-size:8px;color:#a78bfa;">✅</span>';
+                            if(awayIsLoser)  h += '<span style="font-size:8px;color:#ef4444;">⚠️</span>';
+                            h += '<span style="font-size:10px;color:#4a5568;">@</span>';
+                            h += '<span style="font-size:12px;font-weight:800;color:'+(rootProj==='home'?'#a78bfa':'#e8e8e8')+'">'+(g.homeTeam||'').split(' ').pop()+'</span>';
+                            h += '<span style="font-size:9px;color:'+homeCol+';background:'+homeCol+'22;border:1px solid '+homeCol+'44;border-radius:3px;padding:1px 4px;">R'+(homeRoot||'?')+'</span>';
+                            if(homeIsTarget) h += '<span style="font-size:8px;color:#a78bfa;">✅</span>';
+                            if(homeIsLoser)  h += '<span style="font-size:8px;color:#ef4444;">⚠️</span>';
+                            h += '</div>';
+                            h += '<div style="text-align:right;">';
+                            if(projectedWinner){
+                                var projCol=rootProjConf==='STRONG'?'#a78bfa':'#10b981';
+                                h += '<div style="font-size:10px;font-weight:800;color:'+projCol+';">'+projectedWinner.split(' ').pop()+'</div>';
+                                h += '<div style="font-size:8px;color:'+projCol+';opacity:0.7;">'+rootProjConf+' ROOT EDGE</div>';
+                            } else {
+                                h += '<div style="font-size:10px;color:#4a5568;">'+(rootProjConf==='BOTH HIT'?'🤝 BOTH HIT':'\u2014 NEUTRAL')+'</div>';
+                            }
+                            h += '</div></div>';
+                        });
+                        h += '</div>';
+                    });
+                }
+                h += '</div>'; // remaining matchups
+            } // end isToday
+
             h += '</div>'; // page
             el.innerHTML = h;
         }
@@ -16196,7 +16678,15 @@ function _showBracketTable() {
             if (searchInput && document.activeElement === searchInput) {
                 searchCursorPosition = searchInput.selectionStart;
             }
-            const report = accuracyTracker.generateMasterReport();
+            let report;
+            try { report = accuracyTracker.generateMasterReport(); }
+            catch(_genErr) {
+                document.getElementById('content').innerHTML =
+                    '<div style="padding:20px;color:#ef4444;background:#0f1420;border-radius:8px;border:1px solid #ef444433;"><strong>⚠️ Error loading Accuracy tab</strong><br>' +
+                    '<span style="font-size:11px;color:#8b92a7;">' + _genErr.message + '</span><br>' +
+                    '<span style="font-size:10px;color:#4a5568;margin-top:8px;display:block;">Usually caused by a null value in a tracked prediction (e.g. auto-logged tennis/MMA picks without spread data). The fix has been applied — please hard-refresh the page (Ctrl+Shift+R).</span></div>';
+                return;
+            }
             const content = document.getElementById('content');
             if (!report) { content.innerHTML = '<div style="color:#f59e0b;padding:40px;text-align:center;">Error loading report — please refresh.</div>'; return; }
             
@@ -18018,7 +18508,15 @@ function _showBracketTable() {
         }
         
         function showDetailedReport() {
-            const report = accuracyTracker.generateMasterReport();
+            let report;
+            try { report = accuracyTracker.generateMasterReport(); }
+            catch(_genErr) {
+                document.getElementById('content').innerHTML =
+                    '<div style="padding:20px;color:#ef4444;background:#0f1420;border-radius:8px;border:1px solid #ef444433;"><strong>⚠️ Error loading Accuracy tab</strong><br>' +
+                    '<span style="font-size:11px;color:#8b92a7;">' + _genErr.message + '</span><br>' +
+                    '<span style="font-size:10px;color:#4a5568;margin-top:8px;display:block;">Usually caused by a null value in a tracked prediction (e.g. auto-logged tennis/MMA picks without spread data). The fix has been applied — please hard-refresh the page (Ctrl+Shift+R).</span></div>';
+                return;
+            }
             
             let msg = `📊 DETAILED ACCURACY REPORT\n\n`;
             msg += `Overall: ${report.overall.gamesTracked} games tracked\n`;
