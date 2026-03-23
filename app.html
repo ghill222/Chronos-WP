@@ -5939,9 +5939,10 @@ function lookupTeam(teamName) {
                              winRate: (correct/games.length*100).toFixed(1) + '%',
                              total: games.length };
                 }
-                const v2Sport = sportGames.filter(g => g.modelVersion === 'V2-Independent');
+                const v2Sport = sportGames.filter(g => g.modelVersion === 'V2-Independent' || g.modelVersion === 'V2');
                 const v4Sport = sportGames.filter(g => g.modelVersion && g.modelVersion.startsWith('V4'));
                 const v3Sport = sportGames.filter(g => g.modelVersion === 'V3-Gematria');
+                const v1Sport = sportGames.filter(g => !g.modelVersion || g.modelVersion.startsWith('V1') || g.modelVersion === 'AUTO_TAB_POST');
 
                 return {
                     sport: sport,
@@ -5956,6 +5957,7 @@ function lookupTeam(teamName) {
                     totalWinRate: gamesWithVegasTotal > 0 ? (beatVegasTotal / gamesWithVegasTotal * 100).toFixed(1) : '0.0',
                     highConfGames: sportGames.filter(g => g.volatility === 'low').length,
                     lowConfGames: sportGames.filter(g => g.volatility === 'high' || g.volatility === 'UNSTABLE').length,
+                    v1Record: modelWinRate(v1Sport),
                     v2Record: modelWinRate(v2Sport),
                     v3Record: modelWinRate(v3Sport),
                     v4Record: modelWinRate(v4Sport),
@@ -7788,7 +7790,8 @@ function _showPathPanel(slot) {
     const sim = simulateFullBracket();
     const today = new Date();
     const VW_TODAY = calculateAllCalendarsVW(today);
-    const DNA_T = [7,1,3], DNA_L = [4,5];
+    var _obsB = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+const DNA_T = _obsB.targets.slice(); const DNA_L = _obsB.losers.slice();
 
     // Trace this team through all rounds of the sim
     const ROUND_LABELS = { R1:'Round of 64', R2:'Round of 32', S16:'Sweet 16', E8:'Elite 8', FF:'Final Four', CHAMP:'Championship' };
@@ -7855,7 +7858,8 @@ function _showPathPanel(slot) {
     html += '<div style="font-size:10px;color:#4a5568;margin-top:2px;">Projected path based on current simulation + your picks · Click any round to open full Tape analysis</div>';
     html += '</div>';
     html += '<div style="display:flex;gap:8px;align-items:center;">';
-    if (teamRoot) html += '<span style="font-size:11px;font-weight:700;color:'+rootCol+';background:'+rootCol+'11;border:1px solid '+rootCol+'33;border-radius:4px;padding:2px 8px;cursor:help;" title="Mascot cipher root for '+t.name+'. '+( rootOnTarget?'R'+teamRoot+' is a target root today (7/1/3) — strong DNA alignment.':rootIsLoser?'R'+teamRoot+' is a loser root signal today.':'R'+teamRoot+' is neutral today.')+'">🧬 R'+teamRoot+'</span>';
+    var _rt=_rootTipStr(),_lt=_loserTipStr();
+    if (teamRoot) html += '<span style="font-size:11px;font-weight:700;color:'+rootCol+';background:'+rootCol+'11;border:1px solid '+rootCol+'33;border-radius:4px;padding:2px 8px;cursor:help;" title="Mascot cipher root for '+t.name+'. '+(rootOnTarget?'R'+teamRoot+' is a target root today ('+_rt+') — strong DNA alignment.':rootIsLoser?'R'+teamRoot+' is a loser root today ('+_lt+').':'R'+teamRoot+' is neutral today.')+'">🧬 R'+teamRoot+'</span>';
     html += '<button onclick="var p=document.getElementById(\'bracket-path-panel\');if(p)p.remove();_bracketPathTeam=null;" style="background:transparent;border:1px solid #2a3142;color:#4a5568;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:10px;">✕ Close</button>';
     html += '</div>';
     html += '</div>';
@@ -8022,10 +8026,26 @@ function _runBracketTape(gameKey) {
     var resDiv = document.getElementById('bracket-tape-results');
     if (!resDiv) return;
     resDiv.innerHTML = '<div style="color:#8b92a7;font-size:12px;padding:12px;">⚡ Running analysis...</div>';
+// Inject root source banner if placeholder exists
+var _srcDiv = document.getElementById('tape-root-source');
+if(!_srcDiv) {
+    // Insert one above resDiv
+    var _srcBanner = document.createElement('div');
+    _srcBanner.id = 'tape-root-source';
+    _srcBanner.style.cssText = 'font-size:10px;color:#4a5568;padding:4px 8px;background:#080c12;border-bottom:1px solid #1a2030;';
+    resDiv.parentNode.insertBefore(_srcBanner, resDiv);
+}
+(function(){
+    var obs = (typeof getObservedDailyRoots==='function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5],source:'default'};
+    var el = document.getElementById('tape-root-source');
+    if(el) el.innerHTML = '🧬 Active roots: <strong style="color:#a78bfa;">R'+obs.targets.join('/R')+'</strong>'+(obs.losers&&obs.losers.length?' · Loser: R'+obs.losers.join('/R'):'')+' · <span style="color:#4a5568;">'+obs.source+'</span>'+(obs.live?' <span style="color:#10b981;">● live</span>':'');
+})();
 
     var gameDate = dateV ? new Date(dateV + 'T12:00:00') : new Date();
     var allVW = calculateAllCalendarsVW(gameDate);
-    var DNA_T = [7,1,3], DNA_L = [4,5];
+    var _obs = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+var DNA_T = _obs.targets.slice(); var DNA_L = _obs.losers.slice();
+// Debug: console.log('Tape DNA roots from:', _obs.source, 'T:', DNA_T, 'L:', DNA_L);
     var CAL_SHORT = {gregorian:'Greg',ancient_roman:'AncR',unc:'UNC',ifc:'IFC',ethiopian:'Eth',pure_sol:'PureSOL',sol:'SOL',future_gregorian:'SOL',future_gregorian_plus2:'FutG',gemini_rolling:'G-Roll'};
 
     // ── STEP 1: VW scores ──
@@ -8687,7 +8707,8 @@ function _renderBracketVisual(G) {
         const clickTitle = isManualPick ? 'Click to remove your pick' : isWinner ? 'Click to lock as your pick' : 'Click to pick this team as winner';
         const clickStyle = gameKey ? 'cursor:pointer;' : '';
         const myPickBadge = isManualPick ? '<span style="font-size:7px;line-height:1;color:#f59e0b;font-weight:800;margin-left:2px;">👤 MY PICK</span>' : '';
-        const badges=(isWinner||isManualPick)?(myPickBadge)+(lock?'<span title="ALL-3 LOCK — Mode A (conviction), Mode B (tape score), and V2 (statistical) all picked this team independently. Strongest possible signal." style="font-size:8px;line-height:1;color:#10b981;margin-left:2px;cursor:help;">🔒</span>':'')+(dnaLock?'<span title="DNA LOCK — All engines agree AND team mascot root hits today game-date target roots. DNA Path mode confirmed pick." style="font-size:8px;line-height:1;color:#a78bfa;margin-left:2px;cursor:help;">🧬</span>':'')+(dnaHit&&!dnaLock?'<span title="DNA HIT — Team mascot root matches today game-date DNA target roots (R7/R1/R3). DNA alignment present." style="font-size:8px;line-height:1;color:#a78bfa99;margin-left:1px;cursor:help;">🧬</span>':'')+
+        var _rt8709=_rootTipStr();
+        const badges=(isWinner||isManualPick)?(myPickBadge)+(lock?'<span title="ALL-3 LOCK — Mode A (conviction), Mode B (tape score), and V2 (statistical) all picked this team independently. Strongest possible signal." style="font-size:8px;line-height:1;color:#10b981;margin-left:2px;cursor:help;">🔒</span>':'')+(dnaLock?'<span title="DNA LOCK — All engines agree AND team mascot root hits today game-date target roots. DNA Path mode confirmed pick." style="font-size:8px;line-height:1;color:#a78bfa;margin-left:2px;cursor:help;">🧬</span>':'')+(dnaHit&&!dnaLock?'<span title="DNA HIT — Team mascot root matches today game-date observed target roots (\'+_rt8709+\'). Alignment confirmed." style="font-size:8px;line-height:1;color:#a78bfa99;margin-left:1px;cursor:help;">🧬</span>':'')+
             (champ>=2?'<span title="Championship Resonance — This team\'s gematria roots match the Apr 6 Championship VW pattern. The higher the match count, the stronger the alignment with the date of the title game." style="font-size:8px;line-height:1;color:#a78bfa;margin-left:1px;cursor:help;">♦</span>':'')+
             (indy?'<span title="Indianapolis Root Match — One or more of this team\'s name/city gematria roots reduces to 6, matching the Indianapolis city root (6). The Final Four and Championship are played in Indianapolis. Root-6 teams have a vibrational home-field advantage at the venue." style="font-size:8px;line-height:1;color:#f59e0b;margin-left:1px;cursor:help;">⚡</span>':'')+
             (trap?'<span title="Trap Game — A numerological resistance pattern (Gate A or Gate B) fired for this matchup. Higher variance result expected. Treat with caution even if other signals are strong." style="font-size:8px;line-height:1;color:#f59e0b;margin-left:1px;cursor:help;">⚠</span>':''):'';
@@ -10890,7 +10911,8 @@ function _showBracketTable() {
             }
 
             // ── DNA variation score ───────────────────────────────────────────────────
-            var DNA_TARGETS_MC = [7,1,3], DNA_LOSERS_MC = [4,5];
+            var _obsMC=(typeof getObservedDailyRoots==="function")?getObservedDailyRoots():{targets:[7,1,3],losers:[4,5]};
+            var DNA_TARGETS_MC = _obsMC.targets.slice(), DNA_LOSERS_MC = _obsMC.losers.slice();
             function calcVarDNAScoreMC(playerData) {
                 var score = 0, perVar = {};
                 Object.keys(playerData.variations).forEach(function(vk) {
@@ -11047,7 +11069,7 @@ function _showBracketTable() {
                 var safeA = nameA.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
                 var safeB = nameB.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
                 var cardId = 'mc_'+(nameA+nameB).replace(/[^a-zA-Z]/g,'').substring(0,24);
-                var cardDate = tapeGameDate||new Date();
+                var cardDate = meta.gameDate || tapeGameDate || new Date();
 
                 // ── Step 2: Run all signals (must come BEFORE composite scoring) ──
                 var modeAResult=null;
@@ -11058,7 +11080,8 @@ function _showBracketTable() {
                 var modeACal=modeAResult?(modeAResult.winnerCalendar||''):'';
 
                 var dnaPick=null;
-                try{var _dR=computeSkipPatternPick(nameA,nameB,sport);if(_dR)dnaPick=_dR.pick;}catch(e){}
+var dnaMethod=null;
+                try{var _dR=computeSkipPatternPick(nameA,nameB,sport);if(_dR){dnaPick=_dR.pick;dnaMethod=_dR.method||null;}}catch(e){}
 
                 var trapTier=null,trapFlag=null;
                 try{var _tRnk=computeDayResonanceRanking(cardDate,[nameA,nameB]);var _tRes=computeGameTrapTier(nameA,nameB,sport,cardDate,_tRnk);trapTier=_tRes.tier;trapFlag=_tRes.gateType;}catch(e){}
@@ -11074,7 +11097,8 @@ function _showBracketTable() {
                 var lpBoostB=dobB?calcDobBoost(dobB,allVW):{boost:0,label:'',lifePath:null};
 
                 // ── Step 3: Composite scoring (all dependencies now defined) ──
-                var DNA_COMP_T=[7,1,3],DNA_COMP_L=[4,5];
+                var _obsComp=(typeof getObservedDailyRoots==='function')?getObservedDailyRoots():{targets:[7,1,3],losers:[4,5]};
+var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 function _mascotRoot_bmc(n){try{var p=n.trim().split(/\s+/),m=p[p.length-1],s=0;m.toUpperCase().replace(/[^A-Z]/g,'').split('').forEach(function(c){s+=c.charCodeAt(0)-64;});while(s>9)s=String(s).split('').reduce(function(a,d){return a+parseInt(d);},0);return s;}catch(e){return null;}}
                 function _modeAPts_bmc(conv,agrees){if(!agrees)return 0;return conv>=96?60:conv>=90?50:conv>=85?40:conv>=80?30:conv>=75?20:conv>=70?10:5;}
                 function _lpPts_bmc(lp){return lp.boost*6;}
@@ -11130,7 +11154,7 @@ function _showBracketTable() {
                 // ── Step 4: Async DOB fetch (fire-and-forget) ──
                 if(dobA===null||dobB===null){
                     var _cId=cardId,_nA=nameA,_nB=nameB;
-                    Promise.all([autoFetchDob(_nA),autoFetchDob(_nB)]).then(function(dobs){
+                    Promise.all([window._skipDobFetch?Promise.resolve(""):autoFetchDob(_nA), window._skipDobFetch?Promise.resolve(""):autoFetchDob(_nB)]).then(function(dobs){
                         var cellA=document.getElementById(_cId+'_dob_A');
                         var cellB=document.getElementById(_cId+'_dob_B');
                         if(cellA)cellA.innerHTML=renderDobCell(dobs[0],allVW,'#3b82f6',_nA);
@@ -11211,7 +11235,7 @@ function _showBracketTable() {
                 c+='<div style="color:#4a5568;font-size:9px;margin-top:1px;">VW pts</div>';
                 if(lpBoostA.boost!==0)c+='<div style="font-size:9px;color:'+(lpBoostA.boost>0?'#10b981':'#ef4444')+';margin-top:2px;" title="'+lpBoostA.label+'">'+lpBoostA.label+'</div>';
                 var dnaAcol=dnaA.score>=3?'#a78bfa':dnaA.score>=2?'#10b981':dnaA.score>=1?'#f59e0b':'#4a5568';
-                c+='<div style="margin-top:4px;font-size:9px;font-weight:700;color:'+dnaAcol+';background:'+dnaAcol+'11;border:1px solid '+dnaAcol+'22;border-radius:3px;padding:1px 5px;cursor:help;" title="'+dnaA.score+' of 4 name variations hit target roots (R7/R1/R3). Each hit = +25 composite pts">🧬 '+dnaA.score+'/4 vars</div>';
+                c+='<div style="margin-top:4px;font-size:9px;font-weight:700;color:'+dnaAcol+';background:'+dnaAcol+'11;border:1px solid '+dnaAcol+'22;border-radius:3px;padding:1px 5px;cursor:help;" title="'+dnaA.score+' of 4 name variations hit observed daily target roots. Each hit = +25 composite pts">🧬 '+dnaA.score+'/4 vars</div>';
                 if(dnaPick===nameA){var dColA=dnaAgreesComp?'#a78bfa':'#f59e0b';c+='<div style="color:'+dColA+';font-size:9px;font-weight:800;margin-top:3px;cursor:help;" title="DNA Skip-Pattern sequence projects this fighter to win today">🧬 DNA PICK</div>';}
                 if(modeAWinner===nameA){var mColA=modeAConvPct>=85?'#10b981':'#3b82f6';c+='<div style="color:'+mColA+';font-size:9px;margin-top:2px;cursor:help;" title="Mode A Conviction Engine picked this fighter at '+modeAConvPct+'% · '+modeALabel+' tier · via '+modeACal.replace(/_/g,' ').toUpperCase()+'">ModeA '+modeAConvPct+'%</div>';}
                 c+='<div id="'+cardId+'_pickbadgeA" style="min-height:14px;">'+(prevPick==='A'?'<span style="color:#10b981;font-size:10px;font-weight:800;">✅ MY PICK</span>':'')+'</div>';
@@ -11242,7 +11266,7 @@ function _showBracketTable() {
                 c+='<div style="color:#4a5568;font-size:9px;margin-top:1px;">VW pts</div>';
                 if(lpBoostB.boost!==0)c+='<div style="font-size:9px;color:'+(lpBoostB.boost>0?'#10b981':'#ef4444')+';margin-top:2px;" title="'+lpBoostB.label+'">'+lpBoostB.label+'</div>';
                 var dnaBcol=dnaB.score>=3?'#a78bfa':dnaB.score>=2?'#10b981':dnaB.score>=1?'#f59e0b':'#4a5568';
-                c+='<div style="margin-top:4px;font-size:9px;font-weight:700;color:'+dnaBcol+';background:'+dnaBcol+'11;border:1px solid '+dnaBcol+'22;border-radius:3px;padding:1px 5px;cursor:help;" title="'+dnaB.score+' of 4 name variations hit target roots (R7/R1/R3). Each hit = +25 composite pts">🧬 '+dnaB.score+'/4 vars</div>';
+                c+='<div style="margin-top:4px;font-size:9px;font-weight:700;color:'+dnaBcol+';background:'+dnaBcol+'11;border:1px solid '+dnaBcol+'22;border-radius:3px;padding:1px 5px;cursor:help;" title="'+dnaB.score+' of 4 name variations hit observed daily target roots. Each hit = +25 composite pts">🧬 '+dnaB.score+'/4 vars</div>';
                 if(dnaPick===nameB){var dColB=dnaAgreesComp?'#a78bfa':'#f59e0b';c+='<div style="color:'+dColB+';font-size:9px;font-weight:800;margin-top:3px;cursor:help;" title="DNA Skip-Pattern sequence projects this fighter to win today">🧬 DNA PICK</div>';}
                 if(modeAWinner===nameB){var mColB=modeAConvPct>=85?'#10b981':'#3b82f6';c+='<div style="color:'+mColB+';font-size:9px;margin-top:2px;cursor:help;" title="Mode A Conviction Engine picked this fighter at '+modeAConvPct+'% · '+modeALabel+' tier · via '+modeACal.replace(/_/g,' ').toUpperCase()+'">ModeA '+modeAConvPct+'%</div>';}
                 c+='<div id="'+cardId+'_pickbadgeB" style="min-height:14px;">'+(prevPick==='B'?'<span style="color:#10b981;font-size:10px;font-weight:800;">✅ MY PICK</span>':'')+'</div>';
@@ -11264,7 +11288,16 @@ function _showBracketTable() {
                 else if(tripleAlign)c+='<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="TRIPLE LOCK: Mode B VW Tape and Mode A Conviction Engine both agree independently. DNA sequence does not confirm (or unavailable).">🔐 TRIPLE LOCK · '+pickName+'</span>';
                 else if(modesAgree)c+='<span style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="A+B AGREE: Mode A (cipher conviction engine) and Mode B (VW tape scorer) both pick the same fighter independently using different methodologies.">🤝 A+B AGREE · '+pickName+'</span>';
                 else if(modeAWinner)c+='<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="SPLIT: Mode A conviction engine and composite winner disagree. Lower confidence — watch for upset.">⚠️ SPLIT</span>';
-                if(dnaPick){var dnaCol2=dnaAgreesComp?'#a78bfa':'#f59e0b',dnaTag2=dnaAgreesComp?'✓V4':'≠V4';c+='<span style="background:'+dnaCol2+'22;border:1px solid '+dnaCol2+'44;color:'+dnaCol2+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="DNA Skip-Pattern Pick: '+dnaPick.split(' ').pop()+'. The 6-day root sequence (R7/R1/R3 targets) projects this fighter to win. '+(dnaAgreesComp?'Agrees with composite pick.':'Disagrees with composite pick — watch as potential divergence.')+'">🧬 DNA: '+dnaPick.split(' ').pop()+' '+dnaTag2+'</span>';}
+                var _rt11286=_rootTipStr();
+                if(dnaPick){
+                    var dnaCol2=dnaAgreesComp?'#a78bfa':'#f59e0b';
+                    var dnaTag2=dnaAgreesComp?'\u2713V4':'\u2260V4';
+                    var _dpName=dnaPick.split(' ').pop();
+                    var _dmLabel=dnaMethod||'sequence analysis';
+                    var _rt11286b=(typeof _rootTipStr==='function')?_rootTipStr():'R7/R1/R3';
+                    var _tipDNA='DNA Pick: '+_dpName+'. Skip-pattern projects this fighter to win. Active roots: '+_rt11286b+'. Signs: '+dnaTag2+'. Method: '+_dmLabel+'.';
+                    c+='<span style="background:'+dnaCol2+'22;border:1px solid '+dnaCol2+'44;color:'+dnaCol2+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="'+_tipDNA.replace(/"/g,"&quot;")+'">&#x1F9EC; DNA: '+_dpName+' '+dnaTag2+'</span>';
+                }
                 if(isLopsided)c+='<span style="background:#ff6b3522;border:1px solid #ff6b3555;color:#ff6b35;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="LOPSIDED: Winner dominates '+dominantTypes+' of 4 VW metric categories (UN/GD/LD/DPM). Strong vibrational alignment today.">🔥 LOPSIDED · '+pickName+'</span>';
                 if(trapTier===1)c+='<span style="background:#ef444422;border:1px solid #ef444455;color:#ef4444;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="VOID LOCK (Tier 1): Both name variations trigger the gate AND 2+ top resonance calendars are in DPM trap mode. Highest-conviction upset signal.">☠️ VOID LOCK</span>';
                 else if(trapTier===2)c+='<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="HIGH CONVICTION TRAP (Tier 2): Both name variations flagged + 1 top resonance calendar in trap mode.">⚡ TRAP T2</span>';
@@ -11294,7 +11327,8 @@ function _showBracketTable() {
                     Object.keys(pl.variations).forEach(function(vk){
                         var vd=dnaScore.perVar[vk];
                         var vc=vd.hit?'#10b981':vd.loser?'#ef4444':'#4a5568';
-                        var vtip='"'+pl.variations[vk]+'" → dominant root R'+vd.dom+(vd.hit?' ✅ TARGET (R7/R1/R3)':vd.loser?' ⚠️ LOSER ROOT (R4/R5)':' · neutral');
+                        var _rt11316=_rootTipStr(),_lt11316=_loserTipStr();
+                        var vtip='"'+pl.variations[vk]+'" → dominant root R'+vd.dom+(vd.hit?' ✅ TARGET ('+_rt11316+')':vd.loser?' ⚠️ LOSER ROOT ('+_lt11316+')':' · neutral');
                         c+='<span style="font-size:9px;color:'+vc+';background:'+vc+'11;border:1px solid '+vc+'22;border-radius:3px;padding:1px 4px;cursor:help;" title="'+vtip+'">'+vk+' R'+vd.dom+'</span>';
                     });
                     c+='</div>';
@@ -11627,15 +11661,16 @@ function _showBracketTable() {
                 function autoLogFight(f, pick) {
                     try {
                         var pickedName = pick==='A' ? f.nameA : f.nameB;
-                        var gameId = 'mma_' + f.nameA.replace(/\s/g,'') + '_' + f.nameB.replace(/\s/g,'') + '_' + (f.eventDate||TODAY_DATE_STR);
+                        var _mmaDate = f.eventDate || f.section_date || TODAY_DATE_STR;
+                        var gameId = 'mma_' + f.nameA.replace(/\s/g,'').replace(/'/g,'') + '_' + f.nameB.replace(/\s/g,'').replace(/'/g,'') + '_' + _mmaDate;
                         if (accuracyTracker.predictions.has(gameId)) return; // already logged
                         var pA_ = buildTSPlayer(f.nameA), pB_ = buildTSPlayer(f.nameB);
                         var sA_ = scoreTSPlayer(pA_), sB_ = scoreTSPlayer(pB_);
                         var record = {
                             gameId: gameId, timestamp: Date.now(),
-                            gameDate: new Date((f.eventDate||TODAY_DATE_STR)+'T20:00:00').getTime(),
+                            gameDate: new Date(_mmaDate+'T20:00:00').getTime(),
                             sport: 'mma', homeTeam: f.nameA, awayTeam: f.nameB,
-                            isTapeMatch: true,
+                            isTapeMatch: true, gameTime: f.timeStr||f.section||'',
                             predictedHomeWP: sA_.total >= sB_.total ? Math.round(sA_.total/(sA_.total+sB_.total)*100) : Math.round(sB_.total/(sA_.total+sB_.total)*100),
                             v4Winner: pickedName, confidence: 55,
                             modelVersion: 'V4-Chronos', status: 'PENDING',
@@ -11680,6 +11715,12 @@ function _showBracketTable() {
                     });
                 }
 
+                // ── Set VW to actual fight date — critical for correct predictions ──
+                var _mainFightDate = (fights[0] && fights[0].eventDate)
+                    ? new Date(fights[0].eventDate+'T20:00:00') : tapeGameDate;
+                // tapeGameDate: not mutated globally
+                var _mmaLocalVW = calculateAllCalendarsVW(_mainFightDate);
+                console.log('🥊 MMA VW set to:', _mainFightDate.toDateString(), '| DPM:', (allVW.gregorian||{}).dpm);
                 fights.forEach(function(f) {
                     // Auto-pick and pre-select
                     var autoPick = v4AutoPick(f.nameA, f.nameB);
@@ -11689,7 +11730,7 @@ function _showBracketTable() {
                     }
                     if (f.state === 'pre') autoLogFight(f, autoPick);
                     try {
-                        cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', f.state, f);
+                        cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', f.state, Object.assign({}, f, {gameDate: _mainFightDate}));
                     } catch(cardErr) {
                         console.error('buildMatchCard CRASH for', f.nameA, 'vs', f.nameB, ':', cardErr.message, cardErr.stack);
                         cardsHTML += '<div style="background:#1a0808;border:1px solid #ef444455;border-radius:6px;padding:10px;margin-bottom:8px;">'
@@ -11712,12 +11753,18 @@ function _showBracketTable() {
                     if(nextVenueStr) cardsHTML += '<div style="color:#4a5568;font-size:10px;margin-top:2px;">📍 ' + nextVenueStr + '</div>';
                     if(nextDateLabel) cardsHTML += '<div style="color:#a78bfa;font-size:10px;margin-top:1px;">📅 ' + nextDateLabel + ' · V4 auto-predictions pre-selected</div>';
                     cardsHTML += '</div><a href="https://www.espn.com/mma/fightcenter" target="_blank" style="color:#3b82f6;font-size:10px;text-decoration:none;">View on ESPN →</a></div>';
+                    // Set VW to upcoming fight event date
+                    var _upcomingDate = (upcomingFights[0] && upcomingFights[0].eventDate)
+                        ? new Date(upcomingFights[0].eventDate+'T20:00:00') : tapeGameDate;
+                    // tapeGameDate: not mutated globally
+                    var _upcomingLocalVW = calculateAllCalendarsVW(_upcomingDate);
+                    console.log('🥊 Upcoming MMA VW set to:', _upcomingDate.toDateString(), '| DPM:', (allVW.gregorian||{}).dpm);
                     upcomingFights.forEach(function(f) {
                         var autoPick = v4AutoPick(f.nameA, f.nameB);
                         var cId_ = 'mc_'+(f.nameA+f.nameB).replace(/[^a-zA-Z]/g,'').substring(0,24);
                         if (autoPick && !window._tapePicksMap[cId_]) window._tapePicksMap[cId_] = autoPick;
                         autoLogFight(f, autoPick);
-                        try { cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', 'pre', f); } catch(e) {}
+                        try { cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', 'pre', Object.assign({}, f, {gameDate: _upcomingDate})); } catch(e) {}
                     });
                     cardsHTML += '</div>';
                 }
@@ -11852,7 +11899,7 @@ function _showBracketTable() {
                 miami_open_2026: {
                     name: 'Miami Open 2026',
                     venue: 'Hard Rock Stadium, Miami Gardens, FL',
-                    dateRange: 'Mar 17-29, 2026',
+                    dateRange: 'Mar 17-30, 2026 · Includes Global Challengers/ITF',
                     espnUrl: 'https://www.espn.com/tennis/scoreboard/tournament/_/eventId/713-2026/competitionType/1',
                     byDate: {
                         '2026-03-21': [
@@ -11885,6 +11932,87 @@ function _showBracketTable() {
                             // ── Women Round 3 ──
                             { a:'Jessica Pegula', b:'Leylah Fernandez', round:'W·R3', timeStr:'11:00 AM', cA:'USA', cB:'Canada', rankA:'R5' },
                             { a:'Aryna Sabalenka', b:'TBD', round:'W·R3·Night', timeStr:'Night', cA:'Belarus', rankA:'R1' }
+                        ],
+                        '2026-03-23': [
+                            // ── Miami Open Men R3 ──
+                            { a:'Francisco Cerundolo', b:'Daniil Medvedev', round:'M·MO·R3', timeStr:'11:00 AM', cA:'Argentina', cB:'Russia', rankB:'R9' },
+                            { a:'Ugo Humbert', b:'Alexander Shevchenko', round:'M·MO·R3', timeStr:'10:00 AM', cA:'France', cB:'Russia', rankA:'R15' },
+                            { a:'Felix Auger-Aliassime', b:'Terence Atmane', round:'M·MO·R3', timeStr:'11:10 AM', cA:'Canada', cB:'France', rankA:'R16' },
+                            { a:'Frances Tiafoe', b:'Jakub Mensik', round:'M·MO·R3', timeStr:'12:20 PM', cA:'USA', cB:'Czech Republic', rankA:'R18' },
+                            { a:'Alejandro Tabilo', b:'Alex Michelsen', round:'M·MO·R3', timeStr:'3:00 PM', cA:'Chile', cB:'USA' },
+                            { a:'Marin Cilic', b:'Alexander Zverev', round:'M·MO·R3', timeStr:'3:00 PM', cA:'Croatia', cB:'Germany', rankB:'R3' },
+                            { a:'Quentin Halys', b:'Kamil Majchrzak', round:'M·MO·R3', timeStr:'2:40 PM', cA:'France', cB:'Poland' },
+                            { a:'Pedro Sakamoto', b:'Thiago Monteiro', round:'M·MO', timeStr:'4:30 PM', cA:'Brazil', cB:'Brazil' },
+                            { a:'Coleman Wong', b:'Nicolas Mejia', round:'M·MO', timeStr:'4:00 PM', cA:'USA', cB:'Colombia' },
+                            { a:'Mitchell Krueger', b:'Borna Gojo', round:'M·MO', timeStr:'4:00 PM', cA:'USA', cB:'Croatia' },
+                            { a:'Oliver Crawford', b:'Chris Rodesch', round:'M·MO', timeStr:'4:00 PM', cA:'USA', cB:'Luxembourg' },
+                            { a:'Corentin Moutet', b:'Jannik Sinner', round:'M·MO·R3·Night', timeStr:'6:00 PM', cA:'France', cB:'Italy', rankB:'R2' },
+                            // ── Miami Open Women R3 ──
+                            { a:'Karolina Muchova', b:'Alexandra Eala', round:'W·MO·R3', timeStr:'10:00 AM', cA:'Czech Republic', cB:'Philippines' },
+                            { a:'Mirra Andreeva', b:'Victoria Mboko', round:'W·MO·R3', timeStr:'11:10 AM', cA:'Russia', cB:'Canada', rankA:'R8' },
+                            { a:'Sorana Cirstea', b:'Coco Gauff', round:'W·MO·R3', timeStr:'12:10 PM', cA:'Romania', cB:'USA', rankB:'R3' },
+                            { a:'Hailey Baptiste', b:'Jelena Ostapenko', round:'W·MO·R3', timeStr:'12:20 PM', cA:'USA', cB:'Latvia', rankB:'R20' },
+                            { a:'Qinwen Zheng', b:'Aryna Sabalenka', round:'W·MO·R3·Night', timeStr:'1:20 PM', cA:'China', cB:'Belarus', rankB:'R1', rankA:'R7' },
+                            { a:'Jaqueline Cristian', b:'Jessica Pegula', round:'W·MO·R3', timeStr:'1:30 PM', cA:'Romania', cB:'USA', rankB:'R5' },
+                            { a:'Amanda Anisimova', b:'Belinda Bencic', round:'W·MO·R3', timeStr:'6:00 PM', cA:'USA', cB:'Switzerland', rankA:'R6' },
+                            { a:'Talia Gibson', b:'Elena Rybakina', round:'W·MO·R3·Night', timeStr:'7:30 PM', cA:'Australia', cB:'Kazakhstan', rankB:'R12' },
+                            // ── Challengers/ITF Men ──
+                            { a:'Enrico Dalla Valle', b:'David Jorda Sanchis', round:'M·CH', timeStr:'4:00 AM', cA:'Italy', cB:'Spain' },
+                            { a:'Sara Sorribes Tormo', b:'Ana Petkovic', round:'W·CH', timeStr:'6:00 AM', cA:'Spain', cB:'Germany' },
+                            { a:'Simone Agostini', b:'Gerard Campana Lee', round:'M·CH', timeStr:'5:55 AM', cA:'Italy', cB:'Spain' },
+                            { a:'Hynek Barton', b:'Lorenzo Rottoli', round:'M·CH', timeStr:'6:10 AM', cA:'Czech Republic', cB:'Italy' },
+                            { a:'Benjamin Hassan', b:'Dali Blanch', round:'M·CH', timeStr:'6:10 AM', cA:'Germany', cB:'USA' },
+                            { a:'Lorenzo Carboni', b:'Francesco Forti', round:'M·CH', timeStr:'6:10 AM', cA:'Italy', cB:'Italy' },
+                            { a:'Mirza Basic', b:'Juan Cruz Martin Manzano', round:'M·CH', timeStr:'6:10 AM', cA:'Bosnia', cB:'Argentina' },
+                            { a:'Christoph Negritu', b:'Ilya Ivashka', round:'M·CH', timeStr:'6:10 AM', cA:'Germany', cB:'Belarus' },
+                            { a:'Raul Brancaccio', b:'Alejo Sanchez Quilez', round:'M·CH', timeStr:'6:10 AM', cA:'Italy', cB:'Spain' },
+                            { a:'Lola Radivojevic', b:'Alina Charaeva', round:'W·CH', timeStr:'6:20 AM', cA:'France', cB:'Russia' },
+                            { a:'Suzan Lamens', b:'Yasmine Kabbaj', round:'W·CH', timeStr:'6:20 AM', cA:'Netherlands', cB:'Morocco' },
+                            { a:'Maja Chwalinska', b:'Tamara Zidansek', round:'W·CH', timeStr:'6:30 AM', cA:'Poland', cB:'Slovenia' },
+                            { a:'Vitaliy Sachko', b:'Geoffrey Blancaneaux', round:'M·CH', timeStr:'7:00 AM', cA:'Ukraine', cB:'France' },
+                            { a:'Leyre Romero Gormaz', b:'Lina Gjorcheska', round:'W·CH', timeStr:'7:30 AM', cA:'Spain', cB:'North Macedonia' },
+                            { a:'Sascha Gueymard Wayenburg', b:'Jacopo Berrettini', round:'M·CH', timeStr:'7:30 AM', cA:'France', cB:'Italy' },
+                            { a:'Andrej Nedic', b:'Jelle Sels', round:'M·CH', timeStr:'7:30 AM', cA:'Serbia', cB:'Netherlands' },
+                            { a:'Maiar Sherif Ahmed Abdelaziz', b:'Anouk Koevermans', round:'W·CH', timeStr:'7:40 AM', cA:'Egypt', cB:'Netherlands' },
+                            { a:'Nikolas Sanchez Izquierdo', b:'Ugo Blanchet', round:'M·CH', timeStr:'8:00 AM', cA:'Spain', cB:'France' },
+                            { a:'Sumit Nagal', b:'Henri Squire', round:'M·CH', timeStr:'8:00 AM', cA:'India', cB:'Germany' },
+                            { a:'Zdenek Kolar', b:'Alejandro Moro Canas', round:'M·CH', timeStr:'8:30 AM', cA:'Czech Republic', cB:'Spain' },
+                            { a:'Lloyd Harris', b:'Ivan Gakhov', round:'M·CH', timeStr:'8:30 AM', cA:'South Africa', cB:'Russia' },
+                            { a:'Tom Gentzsch', b:'Jonas Forejtek', round:'M·CH', timeStr:'8:40 AM', cA:'Germany', cB:'Czech Republic' },
+                            { a:'Felix Gill', b:'Martin Krumich', round:'M·CH', timeStr:'8:40 AM', cA:'Germany', cB:'Czech Republic' },
+                            { a:'Andrea Pellegrino', b:'Filip Cristian Jianu', round:'M·CH', timeStr:'9:00 AM', cA:'Italy', cB:'Romania' },
+                            { a:'Pablo Llamas Ruiz', b:'Elmer Moller', round:'M·CH', timeStr:'9:40 AM', cA:'Spain', cB:'Denmark' },
+                            { a:'Ugo Humbert', b:'Alexander Shevchenko', round:'M·CH', timeStr:'10:00 AM' },
+                            { a:'Edas Butvilas', b:'Pol Martin Tiffon', round:'M·CH', timeStr:'10:00 AM', cA:'Lithuania', cB:'Spain' },
+                            { a:'Christopher Li', b:'Matteo Covato', round:'M·CH', timeStr:'10:00 AM', cA:'USA', cB:'Italy' },
+                            { a:'Joao Eduardo Schiessl', b:'Daniel Cukierman', round:'M·CH', timeStr:'10:00 AM', cA:'Brazil', cB:'Chile' },
+                            { a:'Natan Rodrigues', b:'Nicolas Villalon Valdes', round:'M·CH', timeStr:'10:00 AM', cA:'Brazil', cB:'Chile' },
+                            { a:'Maximo Zeitune', b:'Daniel Salazar Martinez', round:'M·CH', timeStr:'10:00 AM', cA:'Argentina', cB:'Colombia' },
+                            { a:'Connor Huertas Del Pino', b:'Boris Arias', round:'M·CH', timeStr:'10:00 AM', cA:'USA', cB:'Bolivia' },
+                            { a:'Arklon Huertas Del Pino Cordova', b:'Rafael Tosetto', round:'M·CH', timeStr:'10:00 AM', cA:'Peru', cB:'Brazil' },
+                            { a:'Alafia Ayeni', b:'Guillermo Tunas', round:'M·CH', timeStr:'12:00 PM', cA:'USA', cB:'Argentina' },
+                            { a:'Facundo Mena', b:'Maxwell McKennon', round:'M·CH', timeStr:'12:00 PM', cA:'Argentina', cB:'USA' },
+                            { a:'Miguel Tobon', b:'Patrick Zahraj', round:'M·CH', timeStr:'12:00 PM', cA:'Colombia', cB:'Slovakia' },
+                            { a:'Benjamin Torrealba', b:'Noah Schachter', round:'M·CH', timeStr:'11:10 AM', cA:'Venezuela', cB:'USA' },
+                            { a:'Sebastian Ofner', b:'Timofey Skatov', round:'M·CH', timeStr:'11:10 AM', cA:'Austria', cB:'Kazakhstan' },
+                            { a:'Victor Braga', b:'Breno Braga', round:'M·CH', timeStr:'11:10 AM', cA:'Brazil', cB:'Brazil' },
+                            { a:'Johannes Ingildsen', b:'Wilson Leite', round:'M·CH', timeStr:'11:10 AM', cA:'Denmark', cB:'Brazil' },
+                            { a:'Jose Pereira', b:'Joao Vitor Goncalves Ceolin', round:'M·CH', timeStr:'11:10 AM', cA:'Portugal', cB:'Brazil' },
+                            { a:'Daniel Antonio Nunez', b:'Franco Ribero', round:'M·CH', timeStr:'11:10 AM', cA:'Paraguay', cB:'Argentina' },
+                            { a:'Joao Victor Couto Loureiro', b:'Benjamin Thomas George', round:'M·CH', timeStr:'11:10 AM', cA:'Brazil', cB:'USA' },
+                            { a:'Marc Polmans', b:'Tibo Colson', round:'M·CH', timeStr:'1:10 PM', cA:'Australia', cB:'Belgium' },
+                            { a:'Juan Cruz Martin Manzano', b:'Peter Bertran', round:'M·CH', timeStr:'12:30 PM', cA:'Argentina', cB:'USA' },
+                            { a:'Juan Manuel La Serna', b:'Felix Corwin', round:'M·CH', timeStr:'12:30 PM', cA:'Argentina', cB:'USA' },
+                            { a:'Valerio Aboian', b:'Garrett Johns', round:'M·CH', timeStr:'12:30 PM', cA:'Italy', cB:'USA' },
+                            { a:'Juan Carlos Prado Angelo', b:'Daniel Dutra Da Silva', round:'M·CH', timeStr:'12:20 PM', cA:'Bolivia', cB:'Brazil' },
+                            { a:'Lorenzo Joaquin Rodriguez', b:'Juan Sebastian Gomez', round:'M·CH', timeStr:'1:40 PM', cA:'Argentina', cB:'Colombia' },
+                            { a:'Carlos Maria Zarate', b:'Frazier Rengifo', round:'M·CH', timeStr:'1:40 PM', cA:'Argentina', cB:'USA' },
+                            { a:'Luciano Emanuel Ambrogi', b:'Paulo Andre Saraiva Dos Santos', round:'M·CH', timeStr:'1:40 PM', cA:'Argentina', cB:'Brazil' },
+                            { a:'Quinn Vandecasteele', b:'Max Wiskandt', round:'M·CH', timeStr:'2:00 PM', cA:'Belgium', cB:'Germany' },
+                            { a:'Mateus Alves', b:'Robin Catry', round:'M·CH', timeStr:'2:00 PM', cA:'Brazil', cB:'France' },
+                            { a:'Juan Bautista Torres', b:'Murkel Dellien', round:'M·CH', timeStr:'1:30 PM', cA:'Argentina', cB:'Bolivia' },
+                            { a:'Borna Gojo', b:'Mitchell Krueger', round:'M·CH', timeStr:'4:00 PM', cA:'Croatia', cB:'USA' },
+                            { a:'Roman Andres Burruchaga', b:'Gustavo Heide', round:'M·CH', timeStr:'5:40 PM', cA:'Argentina', cB:'Brazil' }
                         ]
                     }
                 }
@@ -11910,7 +12038,40 @@ function _showBracketTable() {
                 }
 
                 function renderTennisDay(matches, dateStr, dateLabel) {
+                    // Suppress Wikipedia DOB lookups for large slates to avoid rate limiting
+                    window._skipDobFetch = matches.length > 10;
                     var html2 = '';
+
+                    // ── Set VW to the actual match date — critical for correct predictions ──
+                    var _tennisMatchDate = new Date(dateStr+'T14:00:00');
+                    // tapeGameDate preserved as global for manual tape use
+                    var _localVW = calculateAllCalendarsVW(_tennisMatchDate);
+
+                    // Sort by tournament tier then start time
+                    var TOURNEY_RANK = function(round) {
+                        if (!round) return 99;
+                        if (round.indexOf('MO') !== -1) return 0;   // Miami Open
+                        if (round.indexOf('CH') !== -1) return 1;   // Challenger
+                        if (round.indexOf('ITF') !== -1) return 2;  // ITF
+                        if (round.indexOf('R3') !== -1 || round.indexOf('R4') !== -1) return 0; // Legacy MO rounds
+                        return 3;
+                    };
+                    var TIME_RANK = function(t) {
+                        if (!t || t === 'Follows' || t === 'Night' || t === 'TBD') return 9999;
+                        var m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                        if (!m) return 9999;
+                        var h = parseInt(m[1]), min = parseInt(m[2]), pm = m[3].toUpperCase() === 'PM';
+                        if (h === 12) h = pm ? 12 : 0;
+                        else if (pm) h += 12;
+                        return h * 60 + min;
+                    };
+                    var sorted = matches.slice().sort(function(a, b) {
+                        var tA = TOURNEY_RANK(a.round), tB = TOURNEY_RANK(b.round);
+                        if (tA !== tB) return tA - tB;
+                        return TIME_RANK(a.timeStr) - TIME_RANK(b.timeStr);
+                    });
+                    matches = sorted;
+
                     // Section header
                     html2 += '<div style="background:#0a1828;border:1px solid #3b82f644;border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">';
                     html2 += '<div>';
@@ -11928,33 +12089,99 @@ function _showBracketTable() {
                         if(m.a) window._fightMeta[m.a] = {rank:m.rankA||'', country:m.cA||'', flag:''};
                         if(m.b) window._fightMeta[m.b] = {rank:m.rankB||'', country:m.cB||'', flag:''};
                         var pA_=buildTSPlayer(m.a), pB_=buildTSPlayer(m.b);
-                        var sA_=scoreTSPlayer(pA_), sB_=scoreTSPlayer(pB_);
+                var _savedVW=allVW; allVW=_localVW||allVW; var sA_=scoreTSPlayer(pA_), sB_=scoreTSPlayer(pB_); allVW=_savedVW;
                         var autoPick = sA_.total >= sB_.total ? 'A' : 'B';
                         var cId_='mc_'+(m.a+m.b).replace(/[^a-zA-Z]/g,'').substring(0,24);
                         if(!window._tapePicksMap[cId_]) window._tapePicksMap[cId_]=autoPick;
                         // Auto-log to accuracy tracker
                         if (!isTBD) {
                             try {
-                                var gid2='tennis_'+m.a.replace(/\s+/g,'')+'_'+m.b.replace(/\s+/g,'')+'_'+dateStr.replace(/-/g,'');
-                                if (!accuracyTracker.predictions.has(gid2)) {
+                                var gid2='tennis_'+m.a.replace(/\s+/g,'').replace(/'/g,'')+'_'+m.b.replace(/\s+/g,'').replace(/'/g,'')+'_'+dateStr.replace(/-/g,'');
+                                if (!accuracyTracker.predictions.has(gid2) && !accuracyTracker.results.has(gid2)) {
                                     var pickedName2=autoPick==='A'?m.a:m.b;
+                                    var loserName2=autoPick==='A'?m.b:m.a;
+                                    var total2=sA_.total+sB_.total;
+                                    var confPct2=total2>0?Math.min(97,Math.round(Math.max(sA_.total,sB_.total)/total2*100)):55;
+                                    var margin2=Math.abs(sA_.total-sB_.total);
+                                    var edgeLabel2=margin2<=20?'TOO CLOSE':margin2<=45?'SLIGHT':margin2<=70?'MODERATE':margin2<=90?'CLEAR':'DOMINANT';
+                                    // Mode A conviction — use match date
+                                    // Parse actual match start time from timeStr (e.g. "11:00 AM", "6:00 PM")
+                                    var _mDate2=(function(){
+                                        try{
+                                            var ts=m.timeStr||'';
+                                            var tm=ts.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                                            if(tm){
+                                                var h=parseInt(tm[1]),mn=parseInt(tm[2]),pm=tm[3].toUpperCase()==='PM';
+                                                if(h===12) h=pm?12:0; else if(pm) h+=12;
+                                                var d=new Date(dateStr+'T00:00:00');
+                                                d.setHours(h,mn,0,0);
+                                                return d;
+                                            }
+                                        }catch(e){}
+                                        return new Date(dateStr+'T14:00:00');
+                                    })();
+                                    var _modeA2=null; try{ _modeA2=computeModeAConviction(m.a,m.b,_mDate2); }catch(e){}
+                                    var modeAWin2=(_modeA2||{}).winner||pickedName2;
+                                    var modeAConv2=(_modeA2||{}).convPct||0;
+                                    var modeALabel2=(_modeA2||{}).label||null;
+                                    var modesAgree2=!!(modeAWin2&&modeAWin2===pickedName2);
+                                    // Skip pattern
+                                    var _dna2=null; try{ _dna2=computeSkipPatternPick(m.a,m.b,'tennis'); }catch(e){}
+                                    var skipPick2=(_dna2||{}).pick||null;
+                                    var skipMethod2=(_dna2||{}).method||null;
+                                    var dnaAgreesComp2=!!(skipPick2&&skipPick2===pickedName2);
+                                    // Lock badges — same logic as buildMatchCard
+                                    var allThreeLock2=modesAgree2&&dnaAgreesComp2;
+                                    var tripleAlign2=modesAgree2&&!dnaAgreesComp2;
+                                    // DNA variation scores — use calcVarDNAScoreMC (same as match card)
+                                    // Temporarily set DNA_TARGETS_MC to today's observed roots
+                                    var _savedMC=DNA_TARGETS_MC.slice(),_savedLMC=DNA_LOSERS_MC.slice();
+                                    var _obsR2=(typeof getObservedDailyRoots==='function')?getObservedDailyRoots():{targets:[7,1,3],losers:[4,5]};
+                                    DNA_TARGETS_MC.splice(0,DNA_TARGETS_MC.length); _obsR2.targets.forEach(function(r){DNA_TARGETS_MC.push(r);});
+                                    DNA_LOSERS_MC.splice(0,DNA_LOSERS_MC.length); _obsR2.losers.forEach(function(r){DNA_LOSERS_MC.push(r);});
+                                    var dnaA2=calcVarDNAScoreMC(pA_), dnaB2=calcVarDNAScoreMC(pB_);
+                                    DNA_TARGETS_MC.splice(0,DNA_TARGETS_MC.length); _savedMC.forEach(function(r){DNA_TARGETS_MC.push(r);});
+                                    DNA_LOSERS_MC.splice(0,DNA_LOSERS_MC.length); _savedLMC.forEach(function(r){DNA_LOSERS_MC.push(r);});
+                                    var wVar2=autoPick==='A'?dnaA2.score:dnaB2.score;
+                                    var lVar2=autoPick==='A'?dnaB2.score:dnaA2.score;
+                                    var delta2=wVar2-lVar2;
+                                    // Trap tier
+                                    var trapTier2=null,trapFlag2=null;
+                                    try{ var _gmT2=computeDayResonanceRanking(_mDate2,[m.a,m.b]); var _tr2=computeGameTrapTier(m.a,m.b,'tennis',_mDate2,_gmT2); trapTier2=_tr2.tier||null; trapFlag2=_tr2.gateType||null; }catch(e){}
+                                    // V4 conviction label
+                                    var v4ConvLabel2=modeALabel2||(modeAConv2>=95?'GOLDEN KEY':modeAConv2>=90?'STRUCTURAL LOCK':modeAConv2>=85?'IDENTITY OVERLAP':modeAConv2>=80?'SPEED INTERCEPT':'BASELINE MATCH');
+                                    var v4ConvPct2=modeAConv2||confPct2;
+                                    // Top calendars
+                                    var topCals2=autoPick==='A'?(pA_.topCals||[]):(pB_.topCals||[]);
                                     accuracyTracker.predictions.set(gid2, {
                                         gameId:gid2, timestamp:Date.now(),
-                                        gameDate:new Date(dateStr+'T14:00:00').getTime(),
+                                        gameDate:_mDate2.getTime(),
                                         sport:'tennis', homeTeam:m.a, awayTeam:m.b,
-                                        isTapeMatch:true,
+                                        isTapeMatch:true, gameTime:m.timeStr||'',
                                         predictedHomeWP:sA_.total>=sB_.total?Math.round(sA_.total/(sA_.total+sB_.total)*100):Math.round(sB_.total/(sA_.total+sB_.total)*100),
-                                        v4Winner:pickedName2, confidence:55,
+                                        v4Winner:pickedName2, confidence:v4ConvPct2,
                                         modelVersion:'V4-Chronos', status:'PENDING',
                                         vegasSpread:null, actualHomeScore:null, actualAwayScore:null,
                                         fetchAttempts:0, lastFetchAttempt:null,
-                                        tapeScoreA:sA_.total, tapeScoreB:sB_.total
+                                        tapeScoreA:sA_.total, tapeScoreB:sB_.total,
+                                        tapeConfFinal:v4ConvPct2, tapeEdgeLabel:edgeLabel2,
+                                        v4ConvictionPct:v4ConvPct2, v4ConvictionLabel:v4ConvLabel2,
+                                        modeAWinner:modeAWin2, modeAConvPct:modeAConv2,
+                                        modesAgree:modesAgree2,
+                                        allThreeLock:allThreeLock2, tripleAlign:tripleAlign2, quadLock:false,
+                                        skipPatternPick:skipPick2, skipPatternMethod:skipMethod2,
+                                        dnaWinnerVarScore:wVar2, dnaLoserVarScore:lVar2,
+                                        dnaDelta:delta2, dnaBoost:delta2>0?delta2*5:0,
+                                        dnaMatchesV4:dnaAgreesComp2,
+                                        trapTier:trapTier2, trapFlag:trapFlag2,
+                                        v4MatchingCalendars:topCals2,
+                                        wpError:null, spreadError:null, totalError:null
                                     });
                                     accuracyTracker.saveToStorage();
                                 }
                             } catch(e2){}
                         }
-                        try { html2 += buildMatchCard(m.a, m.b, m.round||'', m.timeStr||'', 'pre', meta); } catch(te){}
+                        try { html2 += buildMatchCard(m.a, m.b, m.round||'', m.timeStr||'', 'pre', Object.assign({}, meta, {gameDate: _tennisMatchDate})); } catch(te){}
                     });
                     return html2;
                 }
@@ -12620,11 +12847,11 @@ function _showBracketTable() {
             VW_TYPES.forEach(function(t) {
                 out += '<div style="text-align: center; color: ' + VW_COLORS[t] + '; font-size: 9px; font-weight: 700;">' + t + '<div style="color: #3a4155; font-size: 8px; font-weight: 400;">🔵</div></div>';
             });
-            out += '<div style="text-align: center; color: ' + pAColor + '; font-size: 9px; font-weight: 700;cursor:help;" title="Weighted total for  + pA.name +  on this calendar. Formula: (UN matches × 4) + (GD matches × 3) + (LD matches × 2) + (DPM matches × 5). Higher = stronger vibrational alignment on this calendar today.">Wtd<div style="color: #3a4155; font-size: 8px; font-weight: 400;">' + pA.name.split(' ').pop() + '</div></div>';
+            out += '<div style="text-align: center; color: ' + pAColor + '; font-size: 9px; font-weight: 700;cursor:help;" title="Weighted total for ' + pA.name + ' on this calendar. Formula: (UN×4)+(GD×3)+(LD×2)+(DPM×5). Higher = stronger alignment.">Wtd<div style="color: #3a4155; font-size: 8px; font-weight: 400;">' + pA.name.split(' ').pop() + '</div></div>';
             VW_TYPES.forEach(function(t) {
                 out += '<div style="text-align: center; color: ' + VW_COLORS[t] + '; font-size: 9px; font-weight: 700;">' + t + '<div style="color: #3a4155; font-size: 8px; font-weight: 400;">🔴</div></div>';
             });
-            out += '<div style="text-align: center; color: ' + pBColor + '; font-size: 9px; font-weight: 700;cursor:help;" title="Weighted total for  + pB.name +  on this calendar. Formula: (UN matches × 4) + (GD matches × 3) + (LD matches × 2) + (DPM matches × 5). Higher = stronger vibrational alignment on this calendar today.">Wtd<div style="color: #3a4155; font-size: 8px; font-weight: 400;">' + pB.name.split(' ').pop() + '</div></div>';
+            out += '<div style="text-align: center; color: ' + pBColor + '; font-size: 9px; font-weight: 700;cursor:help;" title="Weighted total for ' + pB.name + ' on this calendar. Formula: (UN×4)+(GD×3)+(LD×2)+(DPM×5). Higher = stronger alignment.">Wtd<div style="color: #3a4155; font-size: 8px; font-weight: 400;">' + pB.name.split(' ').pop() + '</div></div>';
             out += '</div>';
 
             calKeys.forEach(function(calName) {
@@ -12700,11 +12927,14 @@ function _showBracketTable() {
             // highlighted against today\'s target roots (DNA pattern for the day).
             out += '<div style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 20px; margin-bottom: 20px;">';
             out += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
-            out += '<h3 style="color: #fff; margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;cursor:help;" title="Name Variations Root DNA: Each name is processed in 4 forms (full, city/first, mascot/last, initials). Each runs through 12 gematria ciphers to find its dominant digital root. That root is compared to todays DNA targets (R7/R1/R3 = target; R4/R5 = loser; R6 = secondary positive). More target hits = stronger cipher alignment today.">🧬 Name Variations — Root DNA vs Todays VW</h3>';
+            var _rt12829=_rootTipStr(),_lt12829=_loserTipStr();
+            out += '<h3 style="color: #fff; margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;cursor:help;" title="Name Variations Root DNA: Each name is processed in 4 forms (full, city/first, mascot/last, initials). Each runs through 12 gematria ciphers to find its dominant digital root. Compared to today\'s DNA targets: '+_rt12829+' = target; '+_lt12829+' = loser. More target hits = stronger cipher alignment.">🧬 Name Variations — Root DNA vs Todays VW</h3>';
 
             // Today's target roots from skip-pattern + LD=1 constant
             var todayVWdna = allVW['gregorian'] || {};
-            var dnaTargetRoots = [7, 1, 3]; // skip-pattern primaries
+            // Dynamic roots from observed game results — updates as day progresses
+            var _obsS = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+            var dnaTargetRoots = _obsS.targets.length > 0 ? _obsS.targets : [7,1,3]; // skip-pattern primaries
             // Add Gregorian VW roots as additional context
             var vwActiveRoots = [todayVWdna.un, todayVWdna.gd, todayVWdna.ld, todayVWdna.dpm].filter(Boolean);
             var loserRoots = [4, 5];
@@ -15033,7 +15263,10 @@ function _showBracketTable() {
                     trapTier     = _stored.trapTier  || null;
                     allThreeLock = _stored.allThreeLock || false;
                     tripleAlign  = _stored.tripleAlign  || false;
-                    quadLock     = _stored.quadLock     || false;
+                    // Only honour stored quadLock if game had a Vegas line
+                    // Prevents false quads on MLB/no-line games saved before this fix
+                    const _hasVegas = (_stored.vegasSpread !== null && _stored.vegasSpread !== undefined);
+                    quadLock     = _hasVegas ? (_stored.quadLock || false) : false;
                     upsetAlert   = _stored.upsetAlert   || false;
                     matrixSequence = _stored.matrixSequence || false;
                     dnaWinnerRoot  = _stored.dnaWinnerRoot  || null;
@@ -15121,7 +15354,8 @@ function _showBracketTable() {
                 const v4v2VegasAll = v4pick && v2pick && vegasFav && v4pick===v2pick && v4pick===vegasFav;
                 const v4v2Only     = v4pick && v2pick && v4pick===v2pick;
                 const v4VegasOnly  = v4pick && vegasFav && v4pick===vegasFav;
-                const derivedQuad        = (quadLock||false)       || v4v2VegasAll;
+                // quadLock requires Vegas — never fire on sports with no spread (MLB etc)
+                const derivedQuad        = ((quadLock||false) && vegasFav!==null) || v4v2VegasAll;
                 // ALL-3 LOCK: requires stored sidebar flag (Mode A+B+V2) OR V4+V2+Vegas all agree
                 // Do NOT fire on V4+V2 alone — that produces false signals when Vegas disagrees
                 const derivedAllThreeLock= (allThreeLock||false)   || v4v2VegasAll;
@@ -15258,23 +15492,9 @@ function _showBracketTable() {
                         return { root: dom, count: rootCounts[dom]||0, total: Object.keys(CIPHERS).length };
                     } catch(e) { return null; }
                 }
-                const DNA_T = [7,1,3]; const DNA_L = [4,5];
-                // Override with dynamic targets from todays VW if pattern analysis has run
-                // and from the LD=1 constant baseline
-                (function() {
-                    var todayVW = calculateAllCalendarsVW(new Date())['gregorian'] || {};
-                    var vwRoots = [todayVW.un, todayVW.gd, todayVW.dpm].filter(Boolean);
-                    // LD=1 constant primes (always R7/R1/R3/R6 for 2026)
-                    var ldPrimes = [7,1,3,6];
-                    // Union of VW roots + LD primes, ranked: LD primes first then VW-only additions
-                    var combined = ldPrimes.slice();
-                    vwRoots.forEach(function(r){ if (!combined.includes(r)) combined.push(r); });
-                    // Replace DNA_T with top 3 from combined (keeps array reference same)
-                    DNA_T.splice(0, DNA_T.length); combined.slice(0,3).forEach(function(r){ DNA_T.push(r); });
-                    // Loser roots = roots not in ldPrimes and not in VW roots
-                    DNA_L.splice(0, DNA_L.length);
-                    for (var r=1;r<=9;r++) { if (!combined.slice(0,4).includes(r)) DNA_L.push(r); }
-                })();
+                // Dynamic roots from observed game results (today → yesterday → cache → fallback)
+                var _obsM = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+                const DNA_T = _obsM.targets.slice(); const DNA_L = _obsM.losers.slice();
                 const awayDNA = getTeamDNARoot(g.at);
                 const homeDNA = getTeamDNARoot(g.ht);
 
@@ -17612,6 +17832,7 @@ function _showBracketTable() {
                 } else {
                     const overallWinRateNum = parseFloat(sportReport.winLossRecord.winRate);
                     const modelRows = [
+                        sportReport.v1Record && sportReport.v1Record.total>0 ? `<div class="sport-stat"><span class="label" style="color:#6b7280;">📊 V1/Other W-L:</span><span class="value">${sportReport.v1Record.record} (${sportReport.v1Record.winRate})</span></div>` : '',
                         sportReport.v2Record ? `<div class="sport-stat"><span class="label" style="color:#10b981;">🎯 V2 W-L:</span><span class="value ${parseFloat(sportReport.v2Record.winRate)>55?'positive':''}">${sportReport.v2Record.record} (${sportReport.v2Record.winRate})</span></div>` : '',
                         sportReport.v3Record && sportReport.v3Record.total>0 ? `<div class="sport-stat"><span class="label" style="color:#8b5cf6;">🔮 V3 W-L:</span><span class="value ${parseFloat(sportReport.v3Record.winRate)>55?'positive':''}">${sportReport.v3Record.record} (${sportReport.v3Record.winRate})</span></div>` : '',
                         sportReport.v4Record && sportReport.v4Record.total>0 ? `<div class="sport-stat"><span class="label" style="color:#667eea;">⚡ V4 W-L:</span><span class="value ${parseFloat(sportReport.v4Record.winRate)>55?'positive':''}">${sportReport.v4Record.record} (${sportReport.v4Record.winRate})</span></div>` : '',
@@ -17667,19 +17888,75 @@ function _showBracketTable() {
                     </div>
             `;
             
-            // Pending games section - NO FILTERING
+            // Pending games section - with sport filter + bulk delete
             if (pending.length > 0) {
-                const sortedPending = pending.sort((a, b) => a.gameDate - b.gameDate);
-                
+                // Get unique sports for filter
+                var _pendingSports = [...new Set(pending.map(g => (g.sport||'unknown').toUpperCase()))].sort();
+                var _activeSportFilter = window._pendingSportFilter || 'ALL';
+                // Reset filter if sport no longer present
+                if (_activeSportFilter !== 'ALL' && !_pendingSports.includes(_activeSportFilter)) {
+                    _activeSportFilter = 'ALL'; window._pendingSportFilter = 'ALL';
+                }
+                const sortedPending = pending
+                    .filter(g => _activeSportFilter === 'ALL' || (g.sport||'unknown').toUpperCase() === _activeSportFilter)
+                    .sort((a, b) => a.gameDate - b.gameDate);
+                const filteredCount = sortedPending.length;
+
+                // Search bar
+                var _searchBar = '<div style="position:relative;margin-bottom:8px;">';
+                _searchBar += '<span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:#4a5568;font-size:12px;">🔍</span>';
+                _searchBar += '<input id="pending-search-input" type="text" placeholder="Search player, team or sport..." value="'+(window._pendingSearchQuery||'')+'" onfocus="window._pendingSearchFocused=true;" onblur="window._pendingSearchFocused=false;" oninput="filterPendingCards(this.value)" style="width:100%;box-sizing:border-box;padding:6px 10px 6px 28px;background:#1a2535;border:1px solid #2a3142;border-radius:5px;color:#e8e8e8;font-size:11px;outline:none;" />';
+                _searchBar += '</div>';
+
+                // Sport filter pill buttons
+                var _sportPills = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">';
+                _sportPills += '<span style="font-size:10px;color:#4a5568;font-weight:700;">Filter:</span>';
+                ['ALL', ..._pendingSports].forEach(function(sp) {
+                    var isActive = sp === _activeSportFilter;
+                    var col = isActive ? '#a78bfa' : '#4a5568';
+                    var bg = isActive ? '#a78bfa22' : 'transparent';
+                    var border = isActive ? '#a78bfa55' : '#2a3142';
+                    _sportPills += '<button onclick="(function(){window._pendingSportFilter=\'' + sp + '\';window._pendingScrollY=0;renderAccuracyDashboard();})()" style="font-size:10px;font-weight:700;color:'+col+';background:'+bg+';border:1px solid '+border+';border-radius:12px;padding:2px 10px;cursor:pointer;">'+sp+'</button>';
+                });
+                _sportPills += '</div>';
+
+                // Checkbox select-all + bulk delete bar
+                var _bulkBar = '<div id="pending-bulk-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">';
+                _bulkBar += '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:#8b92a7;"><input type="checkbox" id="pending-select-all" onchange="(function(cb){var cbs=document.getElementsByClassName(\'pending-game-cb\');for(var x=0;x<cbs.length;x++)cbs[x].checked=cb.checked;updateBulkDeleteBtn();})(this)"> Select All ('+filteredCount+')</label>';
+                _bulkBar += '<button id="bulk-delete-btn" onclick="bulkDeletePending()" style="display:none;background:#2a0a0a;border:1px solid #ef444455;color:#ef4444;padding:3px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">🗑 Delete Selected</button>';
+                _bulkBar += '</div>';
+
                 html += `
                     <div class="pending-section">
                         <div class="pending-header">
-                            <h3>⏳ Pending Results (${pending.length} games)</h3>
+                            <h3>⏳ Pending Results (${filteredCount}${_activeSportFilter!=='ALL'?' '+_activeSportFilter:''} of ${pending.length} total)</h3>
                             <button onclick="accuracyTracker.autoCheckCompletedGames(true)">🔄 Force Check for Updates</button>
                         </div>
+                        ${_searchBar}
+                        ${_sportPills}
+                        ${_bulkBar}
                         <div class="pending-games-list">
                 `;
-                
+
+                // Restore scroll position after delete/resolve
+                var _pendingScroll = window._pendingScrollY || 0;
+                if (_pendingScroll > 0) {
+                    setTimeout(function(){
+                        var _pgl2 = document.querySelector('.pending-games-list');
+                        if (_pgl2) _pgl2.scrollTop = _pendingScroll;
+                    }, 30);
+                }
+                // Re-apply search filter and restore focus after re-render
+                setTimeout(function(){
+                    var _si = document.getElementById('pending-search-input');
+                    if (_si) {
+                        filterPendingCards(_si.value);
+                        if (window._pendingSearchFocused) {
+                            _si.focus();
+                            var v = _si.value; _si.value=''; _si.value=v;
+                        }
+                    }
+                }, 35);
                 sortedPending.forEach(game => {
                     const gameDate = new Date(game.gameDate).toLocaleDateString();
                     const daysSince = Math.floor((Date.now() - game.gameDate) / 86400000);
@@ -17713,7 +17990,7 @@ function _showBracketTable() {
                         html += '<div class="pending-game-card" style="border-left: 3px solid #667eea;">' +
                             '<div class="pending-game-info" style="flex:1;">' +
                                 '<strong>' + tapeEmoji + ' ' + game.homeTeam + ' vs ' + game.awayTeam + '</strong>' +
-                                '<span class="game-date">' + gameDate + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + ' · V4-Tape</span>' +
+                                '<span class="game-date">' + gameDate + (game.gameTime ? ' · ' + game.gameTime : '') + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + ' · V4-Tape</span>' +
                                 // Predicted winner — prominent
                                 '<div style="margin-top:6px;background:#0d1424;border:1px solid #667eea44;border-radius:5px;padding:6px 10px;">' +
                                     '<div style="font-size:10px;color:#667eea;font-weight:700;margin-bottom:3px;">⚡ PREDICTED WINNER</div>' +
@@ -17747,9 +18024,10 @@ function _showBracketTable() {
                                 '<span class="fetch-status" style="margin-top:3px;">' + (game.espnGameId ? '🔄 ESPN auto-resolve' : '⚠️ Manual resolve required') + ' · Attempts: ' + game.fetchAttempts + '/10</span>' +
                             '</div>' +
                             '<div class="pending-game-actions">' +
-                                '<button onclick="submitTapeResult(\x27' + game.gameId + '\x27, ' + (predWinnerTape === game.homeTeam ? 'true' : 'false') + ')" style="background:#0d3321;border:1px solid #10b981;color:#10b981;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;">&#9989; Predicted Won</button>' +
-                                '<button onclick="submitTapeResult(\x27' + game.gameId + '\x27, ' + (predWinnerTape === game.homeTeam ? 'false' : 'true') + ')" style="background:#2a0a0a;border:1px solid #ef4444;color:#ef4444;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;">&#10060; Predicted Lost</button>' +
-                                '<button class="delete" onclick="removePendingGame(\x27' + game.gameId + '\x27)">&#128465;</button>' +
+                                '<button onclick="submitTapeResult(\x27' + game.gameId.replace(/'/g,"\\'") + '\x27, ' + (predWinnerTape === game.homeTeam ? 'true' : 'false') + ')" style="background:#0d3321;border:1px solid #10b981;color:#10b981;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;">&#9989; Predicted Won</button>' +
+                                '<button onclick="submitTapeResult(\x27' + game.gameId.replace(/'/g,"\\'") + '\x27, ' + (predWinnerTape === game.homeTeam ? 'false' : 'true') + ')" style="background:#2a0a0a;border:1px solid #ef4444;color:#ef4444;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;">&#10060; Predicted Lost</button>' +
+                                '<input type="checkbox" class="pending-game-cb" data-gameid="' + game.gameId.replace(/'/g,'') + '" onchange="updateBulkDeleteBtn()" style="width:14px;height:14px;cursor:pointer;accent-color:#a78bfa;">' +
+                                '<button class="delete" onclick="removePendingGame(\x27' + game.gameId.replace(/'/g,"\\'") + '\x27)">&#128465;</button>' +
                             '</div>' +
                         '</div>';
                     } else {
@@ -17786,10 +18064,11 @@ function _showBracketTable() {
                     const modelBadge = modelVer.includes('V4') ? '<span style="font-size:9px;background:#667eea22;border:1px solid #667eea55;border-radius:3px;padding:1px 5px;color:#a78bfa;font-weight:700;">V4-Chronos</span>' :
                                        modelVer.includes('V2') ? '<span style="font-size:9px;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 5px;color:#10b981;font-weight:700;">V2</span>' :
                                        '<span style="font-size:9px;background:#2a314222;border:1px solid #2a3142;border-radius:3px;padding:1px 5px;color:#8b92a7;">V1</span>';
-                    html += '<div class="pending-game-card">' +
+                    var _sh=((game.homeTeam||'')+' '+(game.awayTeam||'')+' '+(game.sport||'')).toLowerCase();
+                    html += '<div class="pending-game-card" data-search="'+_sh+'">' +
                         '<div class="pending-game-info" style="flex:1;">' +
                         '<strong>' + game.awayTeam + ' @ ' + game.homeTeam + '</strong>' +
-                        '<span class="game-date">' + gameDate + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + '</span>' +
+                        '<span class="game-date">' + gameDate + (game.gameTime ? ' · ' + game.gameTime : '') + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + '</span>' +
                         '<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                             // V2 pick
                             '<span style="font-size:9px;color:#10b981;font-weight:700;background:#10b98115;border:1px solid #10b98133;border-radius:3px;padding:1px 5px;">V2</span>' +
@@ -18133,10 +18412,10 @@ function _showBracketTable() {
                             <td>${(!isTapeRow && game.predictedSpread) ? (game.predictedSpread > 0 ? '+' : '') + game.predictedSpread.toFixed(1) : 'N/A'}</td>
                             <td>${(!isTapeRow && game.vegasSpread) ? (game.vegasSpread > 0 ? '+' : '') + game.vegasSpread.toFixed(1) : 'N/A'}</td>
                             <td style="color: ${edge !== 'N/A' && Math.abs(parseFloat(edge)) >= 3 ? '#10b981' : '#8b92a7'}; font-weight: ${edge !== 'N/A' && Math.abs(parseFloat(edge)) >= 3 ? 'bold' : 'normal'};">${edge !== 'N/A' ? (parseFloat(edge) > 0 ? '+' : '') + edge : 'N/A'}</td>
-                            <td>${game.predictedHomeWP.toFixed(1)}%</td>
-                            <td>${game.wpError.toFixed(1)}%</td>
-                            <td>${game.spreadError.toFixed(1)}</td>
-                            <td>${game.beatVegasSpread ? '✅' : '❌'}</td>
+                            <td>${game.predictedHomeWP != null ? game.predictedHomeWP.toFixed(1)+'%' : '—'}</td>
+                            <td>${game.wpError != null && game.wpError === game.wpError ? game.wpError.toFixed(1)+'%' : '—'}</td>
+                            <td>${game.spreadError != null && game.spreadError === game.spreadError ? game.spreadError.toFixed(1) : '—'}</td>
+                            <td>${game.beatVegasSpread === true ? '✅' : game.beatVegasSpread === false ? '❌' : '—'}</td>
                             ${(() => {
                                     const v4label = game.v4ConvictionLabel || '';
                                     const v4pct   = game.v4ConvictionPct || null;
@@ -18536,7 +18815,28 @@ function _showBracketTable() {
 
         // Manual result entry for Tape (Tennis/MMA) predictions
         // playerAWon=true means homeTeam (Player A) won; false means Player B won
+
+        // ── Pending results search — in-place DOM filter, no re-render ──
+        function filterPendingCards(query) {
+            window._pendingSearchQuery = query;
+            var q = (query || '').toLowerCase().trim();
+            var cards = document.querySelectorAll('.pending-game-card');
+            var visible = 0;
+            cards.forEach(function(card) {
+                var hay = (card.getAttribute('data-search') || card.textContent || '').toLowerCase();
+                var show = !q || hay.indexOf(q) !== -1;
+                card.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            // Update count display
+            var h3 = document.querySelector('.pending-header h3');
+            if (h3 && q) {
+                h3.textContent = '⏳ ' + visible + ' match' + (visible !== 1 ? 'es' : '') + ' for "' + query + '"';
+            }
+        }
         function submitTapeResult(gameId, playerAWon) {
+            var _pgl = document.querySelector('.pending-games-list');
+            window._pendingScrollY = _pgl ? _pgl.scrollTop : 0;
             const homeScore = playerAWon ? 1 : 0;
             const awayScore = playerAWon ? 0 : 1;
             accuracyTracker.recordOutcome(gameId, homeScore, awayScore, 'MANUAL');
@@ -18545,7 +18845,36 @@ function _showBracketTable() {
         
         function removePendingGame(gameId) {
             if (!confirm('Remove this game from tracking?')) return;
+            var _pgl = document.querySelector('.pending-games-list');
+            window._pendingScrollY = _pgl ? _pgl.scrollTop : 0;
             accuracyTracker.predictions.delete(gameId);
+            accuracyTracker.saveToStorage();
+            renderAccuracyDashboard();
+        }
+
+        function updateBulkDeleteBtn() {
+            var checked = document.querySelectorAll('.pending-game-cb:checked').length;
+            var btn = document.getElementById('bulk-delete-btn');
+            if (btn) {
+                btn.style.display = checked > 0 ? 'inline-block' : 'none';
+                btn.textContent = '\uD83D\uDDD1 Delete Selected (' + checked + ')';
+            }
+        }
+
+        function bulkDeletePending() {
+            var checked = document.querySelectorAll('.pending-game-cb:checked');
+            if (checked.length === 0) return;
+            if (!confirm('Delete ' + checked.length + ' pending record(s)? This cannot be undone.')) return;
+            var _pgl = document.querySelector('.pending-games-list');
+            window._pendingScrollY = _pgl ? _pgl.scrollTop : 0;
+            checked.forEach(function(cb) {
+                var gid = cb.getAttribute('data-gameid');
+                if (gid) accuracyTracker.predictions.delete(gid);
+            });
+            // Also try with apostrophe variants in case some old records have them
+            accuracyTracker.predictions.forEach(function(v, k) {
+                // Already deleted above; this catches any remaining checked by display name
+            });
             accuracyTracker.saveToStorage();
             renderAccuracyDashboard();
         }
@@ -20900,11 +21229,13 @@ function _showBracketTable() {
                         const rootLine = p.skipPickRoots
                             ? (p.skipPatternPick||'').split(' ').pop()+': city='+p.skipPickRoots.city+' msc='+p.skipPickRoots.mascot+' | '+(p.skipPatternPick===p.homeTeam?p.awayTeam:p.homeTeam).split(' ').pop()+': city='+p.skipOppRoots.city+' msc='+p.skipOppRoots.mascot
                             : (p.skipPatternDetail||'');
-                        const tipText = ('DNA PATTERN PICK — ' + pickName + '\n\nMethod: ' + methodLabel +
-                            '\nToday\'s predicted roots: ' + (p.skipPatternRoots||[]).join(', ') +
-                            '\n\n' + rootLine +
-                            '\n\nSigns: ' + agreeTag +
-                            '\n\nBased on 6-day winner root DNA skip-pattern analysis. Rank #2 sequence (std=1.8) predicts momentum→Root 7, alternating→Root 3, Rank#1→Root 1. No universal anchor.').replace(/"/g,'&quot;');
+                        var _dnaTargetStr = (window._dnaConfirmedTargets && window._dnaConfirmedTargets.length)
+                            ? window._dnaConfirmedTargets.map(function(r){return 'R'+r;}).join('/') + ' (from DNA Matrix)'
+                            : 'not yet established — open DNA Matrix first';
+                        const tipText = ('DNA PICK: ' + pickName + ' · Method: ' + methodLabel +
+                            '\nObserved target roots today: ' + _dnaTargetStr +
+                            '\n' + rootLine +
+                            '\nSigns: ' + agreeTag).replace(/"/g,'&quot;');
                         return '<div style="margin-top:4px;"><span class="chronos-tip" data-tip="' + tipText + '" style="font-size:10px;font-weight:800;color:'+col+';background:'+col+'11;border:1px solid '+col+'44;border-radius:4px;padding:2px 8px;cursor:help;">' + icon + ' DNA: ' + pickName + ' (' + methodLabel + ')' + agreeTag + '</span></div>';
                     })() +
                     ouLineHtml +
@@ -21192,9 +21523,12 @@ function _showBracketTable() {
          * - Positive = home team underdog
          */
         function normalizeHomeSpread(rawSpread, homeTeam, awayTeam, oddsDetails) {
+            // Return null if no spread exists — don't default to 0 (Pick 'em)
+            // 0 from null gets mistaken for a real Vegas line in downstream badge logic
+            if (rawSpread === null || rawSpread === undefined) return null;
             const numericSpread = Number(rawSpread);
             if (!Number.isFinite(numericSpread) || numericSpread === 0) {
-                return 0; // Pick 'em
+                return 0; // Pick 'em (genuine even line)
             }
             
             const homeAbbr = getTeamAbbr(homeTeam).toUpperCase();
@@ -21296,7 +21630,7 @@ function _showBracketTable() {
             const oddsDetails = espnOdds?.details || oddsCache.get(game.id)?.details || "";
             data.spread = normalizeHomeSpread(rawSpread, data.homeTeam, data.awayTeam, oddsDetails);
             
-            if (data.spread !== 0) {
+            if (data.spread !== null && data.spread !== 0) {
                 console.log(`📊 Spread normalized: ${data.homeTeam} ${data.spread < 0 ? '' : '+'}${data.spread.toFixed(1)} (negative = home favored)`);
             }
 
@@ -25975,6 +26309,106 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
             el.innerHTML = h;
         }
 
+
+        // ── Dynamic Daily Root Observer ────────────────────────────────────────────
+        // Returns today's confirmed target/loser roots based on observed results.
+        // Sources in priority order:
+        //   1. Today's completed accuracy results (3+ games = meaningful)
+        //   2. window._dnaConfirmedTargets (set when DNA Matrix is opened)
+        //   3. Yesterday's completed accuracy results
+        //   4. Static fallback [7,1,3] / [4,5]
+        function getObservedDailyRoots() {
+            var today = new Date();
+            var todayKey = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+            var yest = new Date(today); yest.setDate(yest.getDate()-1);
+            var yesterdayKey = yest.getFullYear()+'-'+String(yest.getMonth()+1).padStart(2,'0')+'-'+String(yest.getDate()).padStart(2,'0');
+
+            function _domRoot(name) {
+                try {
+                    var parts=name.trim().split(/\s+/);
+                    var vars={full:name,city:parts.length>1?parts.slice(0,-1).join(' '):name,
+                              mascot:parts[parts.length-1]||name,
+                              abbrev:parts.map(function(p){return p[0]||'';}).join('').toUpperCase()};
+                    var counts={}; for(var r=1;r<=9;r++) counts[r]=0;
+                    Object.values(vars).forEach(function(v){
+                        Object.values(CIPHERS).forEach(function(fn){
+                            var r=calculateDigitalRoot(fn(v)).root; if(r>=1&&r<=9) counts[r]++;
+                        });
+                    });
+                    return Object.keys(counts).map(Number).sort(function(a,b){return counts[b]-counts[a];})[0];
+                } catch(e){ return null; }
+            }
+
+            function _computeRoots(games) {
+                var winR={},lossR={};
+                for(var r=1;r<=9;r++){winR[r]=0;lossR[r]=0;}
+                games.forEach(function(g){
+                    var wr=_domRoot(g.homeWon?g.homeTeam:g.awayTeam);
+                    var lr=_domRoot(g.homeWon?g.awayTeam:g.homeTeam);
+                    if(wr) winR[wr]++; if(lr) lossR[lr]++;
+                });
+                var targets=[],losers=[];
+                for(var r=1;r<=9;r++){
+                    var w=winR[r]||0,l=lossR[r]||0,tot=w+l;
+                    if(tot===0) continue;
+                    var wpct=Math.round(w/tot*100);
+                    if(wpct>=60) targets.push(r);
+                    else if(wpct<=35) losers.push(r);
+                }
+                return {targets:targets,losers:losers,games:games.length};
+            }
+
+            function _gamesForDate(dk) {
+                if(typeof accuracyTracker==='undefined') return [];
+                var out=[];
+                accuracyTracker.results.forEach(function(g){
+                    if(g.status!=='COMPLETED'||g.homeWon===null) return;
+                    var d=new Date(g.gameDate||g.timestamp);
+                    var gk=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+                    if(gk===dk) out.push(g);
+                });
+                return out;
+            }
+
+            // Source 1: today's completed games (need 3+ to be meaningful)
+            var todayGames = _gamesForDate(todayKey);
+            if(todayGames.length >= 3) {
+                var r1 = _computeRoots(todayGames);
+                if(r1.targets.length > 0) {
+                    return {targets:r1.targets, losers:r1.losers,
+                            source:'today ('+todayGames.length+' games)', live:true};
+                }
+            }
+
+            // Source 2: DNA Matrix cache (set when user opens the matrix)
+            if(window._dnaConfirmedTargets && window._dnaConfirmedTargets.length &&
+               window._dnaRootsDate === todayKey) {
+                return {targets:window._dnaConfirmedTargets,
+                        losers:window._dnaConfirmedLosers||[],
+                        source:'DNA Matrix cache', live:false};
+            }
+
+            // Source 3: yesterday's completed games
+            var yesterdayGames = _gamesForDate(yesterdayKey);
+            if(yesterdayGames.length >= 5) {
+                var r2 = _computeRoots(yesterdayGames);
+                if(r2.targets.length > 0) {
+                    return {targets:r2.targets, losers:r2.losers,
+                            source:'yesterday ('+yesterdayGames.length+' games)', live:false};
+                }
+            }
+
+            // Source 4: static fallback
+            return {targets:[7,1,3], losers:[4,5], source:'default fallback', live:false};
+        }
+        function _rootTipStr() {
+            try { var o=getObservedDailyRoots(); return 'R'+o.targets.join('/R')+' ('+o.source+')'; }
+            catch(e){ return 'R7/R1/R3 (default)'; }
+        }
+        function _loserTipStr() {
+            try { var o=getObservedDailyRoots(); return o.losers.length?'R'+o.losers.join('/R'):'none yet'; }
+            catch(e){ return 'R4/R5 (default)'; }
+        }
         window.addEventListener('load', startAutoRefresh);
         window.addEventListener('beforeunload', () => {
             if (refreshInterval) clearInterval(refreshInterval);
