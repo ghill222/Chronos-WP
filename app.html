@@ -2051,7 +2051,8 @@ function calculateLunarDayHKO(date) {
     const LUNAR_MONTH = 29.530588853;
     const knownNewMoon = new Date('2000-01-06T15:44:00.000Z');
     const d = new Date(date);
-    const utcNoon = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0);
+    // Use LOCAL date components to avoid UTC midnight flip for non-UTC timezones
+    const utcNoon = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
     const diff = (utcNoon - knownNewMoon.getTime()) / 1000;
     const days = diff / (24 * 3600);
     const age = ((days % LUNAR_MONTH) + LUNAR_MONTH) % LUNAR_MONTH;
@@ -5218,7 +5219,7 @@ function lookupTeam(teamName) {
                     v4CalendarData = {
                         v4Winner: trackMergedWinner,
                         v4Loser: trackMergedWinner === gameData.homeTeam ? gameData.awayTeam : gameData.homeTeam,
-                        v4Conviction: chronos.winnerConviction.percentage,
+                        v4Conviction: chronos.winnerConviction ? chronos.winnerConviction.percentage : null,
                         v4ConvictionLabel: chronos.winnerConviction ? chronos.winnerConviction.label : null,
                         v4ConvictionPct:   chronos.winnerConviction ? chronos.winnerConviction.percentage : null,
                         v4WinnerCalendar:   chronos.winnerCalendar,
@@ -5255,6 +5256,22 @@ function lookupTeam(teamName) {
                             try {
                                 var dnaR = computeSkipPatternPick(gameData.homeTeam, gameData.awayTeam, sport);
                                 return trackV4V2Agree && dnaR && dnaR.pick === trackMergedWinner;
+                            } catch(e){ return false; }
+                        })(),
+                        dnaMatchesV4: (function(){
+                            try {
+                                var dnaR = computeSkipPatternPick(gameData.homeTeam, gameData.awayTeam, sport);
+                                return !!(dnaR && dnaR.pick === trackMergedWinner);
+                            } catch(e){ return false; }
+                        })(),
+                        vptDnaAlign: (function(){
+                            try {
+                                if (typeof computeVPTRoots !== 'function' || typeof checkVPTDNAAlignment !== 'function') return false;
+                                var _vr = computeVPTRoots();
+                                var _dr = typeof getObservedDailyRoots === 'function' ? getObservedDailyRoots() : null;
+                                if (!_vr || !_dr) return false;
+                                var _res = checkVPTDNAAlignment(trackMergedWinner, _vr, _dr);
+                                return _res || false;
                             } catch(e){ return false; }
                         })(),
                         v2v4agree:    trackV4V2Agree,
@@ -5883,14 +5900,13 @@ function lookupTeam(teamName) {
             
             // Generate sport-specific report
             generateSportReport(sport) {
-                const isTapeSport = (sport === 'tennis' || sport === 'mma');
+                const isTapeSport = (sport === 'tennis' || sport === 'mma' || sport === 'lacrosse' || sport === 'cricket' || sport === 'boxing' || sport === 'esports' || sport === 'rugby');
                 const sportGames = Array.from(this.results.values())
                     .filter(g => (g.sport || '').toLowerCase() === sport.toLowerCase());
-                const sportEmoji = sport === 'tennis' ? '🎾' : sport === 'mma' ? '🥊' : '';
-                const sportDisplayName = sport === 'tennis' ? '🎾 Tennis'
-                    : sport === 'mma' ? '🥊 MMA / UFC'
-                    : sport.toUpperCase();
-
+                const _sportEmojiMap = {tennis:'🎾',mma:'🥊',lacrosse:'🥍',cricket:'🏏',boxing:'🥊',esports:'🎮',rugby:'🏉'};
+                const _sportNameMap  = {tennis:'Tennis',mma:'MMA / UFC',lacrosse:'Lacrosse',cricket:'Cricket',boxing:'Boxing',esports:'E-Sports',rugby:'Rugby'};
+                const sportEmoji = _sportEmojiMap[sport] || '';
+                const sportDisplayName = _sportNameMap[sport] || sport.toUpperCase();
                 if (sportGames.length === 0) {
                     return {
                         sport: sport,
@@ -6123,8 +6139,13 @@ function lookupTeam(teamName) {
                 const nhl = this.generateSportReport('nhl');
                 const mlb = this.generateSportReport('mlb');
                 const soccer = this.generateSportReport('soccer');
-                const tennis = this.generateSportReport('tennis');
-                const mma = this.generateSportReport('mma');
+                const tennis   = this.generateSportReport('tennis');
+                const mma      = this.generateSportReport('mma');
+                const lacrosse = this.generateSportReport('lacrosse');
+                const cricket  = this.generateSportReport('cricket');
+                const boxing   = this.generateSportReport('boxing');
+                const esports  = this.generateSportReport('esports');
+                const rugby    = this.generateSportReport('rugby');
                 
                 // Find most accurate sport
                 // Stats sports only (have WP model + Vegas spreads)
@@ -6190,6 +6211,11 @@ function lookupTeam(teamName) {
                     soccer: soccer,
                     tennis: tennis,
                     mma: mma,
+                    lacrosse: lacrosse,
+                    cricket:  cricket,
+                    boxing:   boxing,
+                    esports:  esports,
+                    rugby:    rugby,
                     comparison: {
                         mostAccurate: mostAccurate,
                         bestVsVegas: bestVsVegas,
@@ -8184,20 +8210,20 @@ var DNA_T = _obs.targets.slice(); var DNA_L = _obs.losers.slice();
     }
 
     // Signal Panel
-    o += '<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;cursor:help;" title="Signal Panel: Shows all active prediction signals for this matchup. ALL-3 LOCK = Mode A conviction + Mode B VW tape + DNA sequence all agree (strongest). TRIPLE LOCK = tape+DNA+Mode A agree. A+B AGREE = both internal modes agree. SPLIT = modes disagree. DNA badge shows skip-pattern sequence pick. Trap badges (VOID/T2/LATENT) indicate upset risk.">Signal Panel</div>';
+    o += '<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;cursor:help;" title="Signal Panel: Shows all active prediction signals for this matchup. ALL-3 LOCK = Mode A conviction + Mode B VW tape + DNA sequence all agree (strongest). TRIPLE LOCK = tape+DNA+Mode A agree. A+B AGREE = both internal modes agree. SPLIT = modes disagree. DNA badge shows todays root sequence pick. Trap badges (VOID/T2/LATENT) indicate upset risk.">Signal Panel</div>';
     o += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:7px;">';
-    if (allThreeLock)    o += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="ALL-3 LOCK: Mode A (conviction engine), Mode B (VW tape score), and DNA skip-pattern sequence all independently pick the same team. Strongest signal in the bracket tape system.">🔒 ALL-3 LOCK · '+pickName+'</span>';
+    if (allThreeLock)    o += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="ALL-3 LOCK: Mode A (conviction engine), Mode B (VW tape score), and DNA root sequence all independently pick the same team. Strongest signal in the bracket tape system.">🔒 ALL-3 LOCK · '+pickName+'</span>';
     else if(tripleAlign) o += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="TRIPLE LOCK: Mode A and Mode B both agree on the same team, but DNA sequence does not confirm. Strong signal — two independent engines align.">🔐 TRIPLE LOCK · '+pickName+'</span>';
     else if(modesAgree)  o += '<span style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="A+B AGREE: Mode A (conviction engine) and Mode B (VW tape) both pick the same team. DNA sequence not checked or does not confirm.">🤝 A+B AGREE · '+pickName+'</span>';
     else if(modeAWinner) o += '<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="SPLIT: Mode A and Mode B disagree on the winner. No alignment signal — treat this matchup with caution. Use DNA pick and VW context to break the tie.">⚠️ SPLIT</span>';
     if (dnaPick) {
         var dCol=dnaAgreesComp?'#a78bfa':'#f59e0b', dTag=dnaAgreesComp?'✓':'≠';
-        o += '<span style="background:'+dCol+'22;border:1px solid '+dCol+'44;color:'+dCol+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;">🧬 DNA: '+dnaPick.split(' ').pop()+' '+dTag+'</span>';
+        o += '<span style="background:'+dCol+'22;border:1px solid '+dCol+'44;color:'+dCol+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="DNA Root Pick: Todays observed winning roots project this fighter to win. '+(dnaAgreesComp?'Agrees with composite prediction — strong confirmation.':'Differs from composite — pattern still accumulating data, treat as early signal.')+'">🧬 DNA: '+dnaPick.split(' ').pop()+' '+dTag+'</span>';
     }
     if (trapTier===1) o += '<span style="background:#ef444422;border:1px solid #ef444455;color:#ef4444;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="VOID LOCK (Trap Tier 1): Both name variations trigger the ordinal gate AND 2+ resonance calendars are in DPM trap mode. Highest upset risk signal — the statistical favourite may be vulnerable. Consider fading or avoiding.">☠️ VOID LOCK</span>';
     else if(trapTier===2) o += '<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="TRAP T2 (Tier 2): Both variations agree on the gate AND 1 top resonance calendar is in trap mode. Strong upset signal — watch before committing to the favourite.">⚡ TRAP T2</span>';
     else if(trapTier===3) o += '<span style="background:#1a2030;border:1px solid #2a3142;color:#8b92a7;font-size:10px;padding:2px 7px;border-radius:4px;cursor:help;" title="LATENT TRAP (Tier 3): Trap structure present in cipher pattern but today DPM has not activated it. Background awareness — low urgency unless DPM shifts.">〰️ LATENT TRAP</span>';
-    if(modeAConvPct>=70){ var cc=modeAConvPct>=95?'#8b5cf6':modeAConvPct>=85?'#10b981':'#3b82f6'; o+='<span style="background:'+cc+'22;border:1px solid '+cc+'44;color:'+cc+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;">'+modeAConvPct+'% '+modeALabel+' · '+(modeAWinner?modeAWinner.split(' ').pop():'')+'</span>'; }
+    if(modeAConvPct>=70){ var cc=modeAConvPct>=95?'#8b5cf6':modeAConvPct>=85?'#10b981':'#3b82f6'; var clbl=modeAConvPct>=95?'GOLDEN KEY':modeAConvPct>=90?'STRUCTURAL LOCK':modeAConvPct>=85?'IDENTITY OVERLAP':modeAConvPct>=80?'SPEED INTERCEPT':'HIGH CONVICTION'; o+='<span style="background:'+cc+'22;border:1px solid '+cc+'44;color:'+cc+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="'+clbl+' ('+modeAConvPct+'%): Mode A conviction score. 95%=Golden Key (rarest, strongest). 90%=Structural Lock. 85%=Identity Overlap. 80%=Speed Intercept. 70%+=High Conviction.">'+modeAConvPct+'% '+modeALabel+' · '+(modeAWinner?modeAWinner.split(' ').pop():'')+'</span>'; }
     o += '<span style="color:'+confColor+';font-size:11px;font-weight:800;">📊 '+finalConf+'%</span>';
     if(modeABoostDisp>0) o+='<span style="font-size:9px;color:#a78bfa;"> +'+modeABoostDisp+'%A</span>';
     if(lpWinner!==0) o+='<span style="font-size:9px;color:'+(lpWinner>0?'#10b981':'#ef4444')+';"> '+(lpWinner>0?'+':'')+lpWinner+'%🗓</span>';
@@ -9777,7 +9803,7 @@ function _showBracketTable() {
                 html += '<span style="font-size:11px;color:#8b92a7;font-weight:700;">TODAY&#39;S LEAD CALS:</span>';
                 todayTop3.forEach(function(r) {
                     var col = r.isTrap ? '#f59e0b' : '#10b981';
-                    html += '<span style="background:' + col + '18;border:1px solid ' + col + '55;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:800;color:' + col + ';">';
+                    html += '<span style="background:' + col + '18;border:1px solid ' + col + '55;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:800;color:' + col + ';cursor:help;" title="' + (CAL_SHORT_TM[r.cal]||r.cal) + ' leads today · DPM=' + r.dpm + (r.isTrap?' · ⚡ DPM trap active: upset risk elevated for favourites whose ordinal root matches DPM.' : ' · ✓ Clean resonance: no trap. Backing favourites is safe here.') + '">';
                     html += (CAL_SHORT_TM[r.cal]||r.cal) + ' DPM=' + r.dpm + (r.isTrap ? ' ⚡' : ' ✓');
                     html += '</span>';
                 });
@@ -9827,7 +9853,7 @@ function _showBracketTable() {
                                 ' \u00b7 ' + g.varSecondary + ':' + g.htS + '+' + g.atS + '\u2192' + g.gA2 + '/' + g.gB2 +
                             '</div>' +
                         '</div>' +
-                        '<span style="font-size:11px;font-weight:800;color:' + tierCol + ';">' + tierIcon + ' ' + tierLabel + '</span>' +
+                        '<span style="font-size:11px;font-weight:800;color:' + tierCol + ';cursor:help;" title="' + (tierLabel==='UPSET SIGNAL'?'VOID LOCK (Tier 1): Both name variations trigger the ordinal gate AND 2+ resonance calendars in DPM trap mode. Maximum upset risk — the statistical favourite is highly vulnerable.':tierLabel==='WATCH'?'HIGH CONVICTION TRAP (Tier 2): Both name variations agree on gate AND 1 resonance calendar in trap mode. Strong upset signal — watch before committing.':'Trap signal detected for this game.') + '">' + tierIcon + ' ' + tierLabel + '</span>' +
                     '</div>';
                 }
 
@@ -10407,10 +10433,10 @@ function _showBracketTable() {
                     ifc: 'IFC (13-Month)',
                     ethiopian: 'Ethiopian',
                     pure_sol: 'Pure SOL',
+                    sol: 'SOL (13th Mo)',
                     future_gregorian: 'SOL (13th Mo)', future_gregorian_plus2: 'Future Greg (+2yr)',
                     gemini_rolling: 'G-Roll (Gemini)'
                 };
-                
                 const anyOffsetActive = vibrationOffsets.un !== 0 || vibrationOffsets.gd !== 0 || vibrationOffsets.ld !== 0;
                 // Format custom date input value (YYYY-MM-DD) for the input field
                 const customDateValue = vwCustomDate 
@@ -10440,6 +10466,32 @@ function _showBracketTable() {
                             Calculate All Ciphers
                         </button>
                         <div id="gematria-results" style="margin-top: 20px;"></div>
+                    </div>
+
+                    <!-- ── Root Number Lookup Tool ─────────────────────────────── -->
+                    <div class="lab-section" id="root-lookup-section" style="background:#1a1f2e;border:1px solid #a78bfa44;border-radius:8px;padding:24px;margin-bottom:20px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+                            <div>
+                                <h2 style="color:#fff;margin:0 0 3px 0;font-size:16px;">🔢 Root Number Lookup</h2>
+                                <p style="color:#4a5568;font-size:11px;margin:0;">Enter 1-3 root numbers → see every team/player playing today whose cipher roots match</p>
+                            </div>
+                            <span style="font-size:10px;color:#a78bfa;background:#a78bfa11;border:1px solid #a78bfa33;padding:3px 10px;border-radius:10px;font-weight:700;">ALL SPORTS + TENNIS/MMA</span>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+                            <input id="root-lookup-input" type="text" placeholder="e.g. 7  or  7,1,3  or  7 1 3" maxlength="20"
+                                style="flex:1;min-width:180px;padding:10px 14px;background:#0f1419;border:1px solid #2a3142;border-radius:5px;color:#e8e8e8;font-size:13px;outline:none;"
+                                onkeypress="if(event.key==='Enter')runRootLookup()"
+                                oninput="document.getElementById('root-lookup-results').innerHTML=''" />
+                            <button onclick="runRootLookup()" style="padding:10px 20px;background:linear-gradient(135deg,#667eea,#a78bfa);border:none;border-radius:5px;color:#fff;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap;">🔍 Find Matches</button>
+                            <button onclick="document.getElementById('root-lookup-input').value='';document.getElementById('root-lookup-results').innerHTML='';" style="padding:10px 14px;background:#1a2535;border:1px solid #2a3142;border-radius:5px;color:#8b92a7;cursor:pointer;font-size:12px;">✕ Clear</button>
+                        </div>
+                        <!-- Quick root pills -->
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
+                            <span style="font-size:10px;color:#4a5568;font-weight:700;">QUICK:</span>
+                            ${[1,2,3,4,5,6,7,8,9].map(r=>'<button onclick="document.getElementById(\'root-lookup-input\').value=\''+r+'\';runRootLookup();" style="padding:3px 10px;background:#1a2535;border:1px solid #2a3142;border-radius:10px;color:#8b92a7;cursor:pointer;font-size:11px;font-weight:700;" title="Find all teams with dominant root R'+r+'">R'+r+'</button>').join('')}
+                            <button onclick="document.getElementById(\'root-lookup-input\').value=\'7,1,3\';runRootLookup();" style="padding:3px 10px;background:#a78bfa22;border:1px solid #a78bfa55;border-radius:10px;color:#a78bfa;cursor:pointer;font-size:11px;font-weight:700;" title="Todays common target roots">R7+R1+R3</button>
+                        </div>
+                        <div id="root-lookup-results"></div>
                     </div>
                     
                     <!-- ── Daily VW Briefing ──────────────────────────────────────── -->
@@ -11236,7 +11288,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 if(lpBoostA.boost!==0)c+='<div style="font-size:9px;color:'+(lpBoostA.boost>0?'#10b981':'#ef4444')+';margin-top:2px;" title="'+lpBoostA.label+'">'+lpBoostA.label+'</div>';
                 var dnaAcol=dnaA.score>=3?'#a78bfa':dnaA.score>=2?'#10b981':dnaA.score>=1?'#f59e0b':'#4a5568';
                 c+='<div style="margin-top:4px;font-size:9px;font-weight:700;color:'+dnaAcol+';background:'+dnaAcol+'11;border:1px solid '+dnaAcol+'22;border-radius:3px;padding:1px 5px;cursor:help;" title="'+dnaA.score+' of 4 name variations hit observed daily target roots. Each hit = +25 composite pts">🧬 '+dnaA.score+'/4 vars</div>';
-                if(dnaPick===nameA){var dColA=dnaAgreesComp?'#a78bfa':'#f59e0b';c+='<div style="color:'+dColA+';font-size:9px;font-weight:800;margin-top:3px;cursor:help;" title="DNA Skip-Pattern sequence projects this fighter to win today">🧬 DNA PICK</div>';}
+                if(dnaPick===nameA){var dColA=dnaAgreesComp?'#a78bfa':'#f59e0b';c+='<div style="color:'+dColA+';font-size:9px;font-weight:800;margin-top:3px;cursor:help;" title="DNA root sequence: todays observed winning roots project this fighter to win">🧬 DNA PICK</div>';}
                 if(modeAWinner===nameA){var mColA=modeAConvPct>=85?'#10b981':'#3b82f6';c+='<div style="color:'+mColA+';font-size:9px;margin-top:2px;cursor:help;" title="Mode A Conviction Engine picked this fighter at '+modeAConvPct+'% · '+modeALabel+' tier · via '+modeACal.replace(/_/g,' ').toUpperCase()+'">ModeA '+modeAConvPct+'%</div>';}
                 c+='<div id="'+cardId+'_pickbadgeA" style="min-height:14px;">'+(prevPick==='A'?'<span style="color:#10b981;font-size:10px;font-weight:800;">✅ MY PICK</span>':'')+'</div>';
                 c+='</div>';
@@ -11267,7 +11319,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 if(lpBoostB.boost!==0)c+='<div style="font-size:9px;color:'+(lpBoostB.boost>0?'#10b981':'#ef4444')+';margin-top:2px;" title="'+lpBoostB.label+'">'+lpBoostB.label+'</div>';
                 var dnaBcol=dnaB.score>=3?'#a78bfa':dnaB.score>=2?'#10b981':dnaB.score>=1?'#f59e0b':'#4a5568';
                 c+='<div style="margin-top:4px;font-size:9px;font-weight:700;color:'+dnaBcol+';background:'+dnaBcol+'11;border:1px solid '+dnaBcol+'22;border-radius:3px;padding:1px 5px;cursor:help;" title="'+dnaB.score+' of 4 name variations hit observed daily target roots. Each hit = +25 composite pts">🧬 '+dnaB.score+'/4 vars</div>';
-                if(dnaPick===nameB){var dColB=dnaAgreesComp?'#a78bfa':'#f59e0b';c+='<div style="color:'+dColB+';font-size:9px;font-weight:800;margin-top:3px;cursor:help;" title="DNA Skip-Pattern sequence projects this fighter to win today">🧬 DNA PICK</div>';}
+                if(dnaPick===nameB){var dColB=dnaAgreesComp?'#a78bfa':'#f59e0b';c+='<div style="color:'+dColB+';font-size:9px;font-weight:800;margin-top:3px;cursor:help;" title="DNA root sequence: todays observed winning roots project this fighter to win">🧬 DNA PICK</div>';}
                 if(modeAWinner===nameB){var mColB=modeAConvPct>=85?'#10b981':'#3b82f6';c+='<div style="color:'+mColB+';font-size:9px;margin-top:2px;cursor:help;" title="Mode A Conviction Engine picked this fighter at '+modeAConvPct+'% · '+modeALabel+' tier · via '+modeACal.replace(/_/g,' ').toUpperCase()+'">ModeA '+modeAConvPct+'%</div>';}
                 c+='<div id="'+cardId+'_pickbadgeB" style="min-height:14px;">'+(prevPick==='B'?'<span style="color:#10b981;font-size:10px;font-weight:800;">✅ MY PICK</span>':'')+'</div>';
                 c+='</div>';
@@ -11284,7 +11336,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 c+='<div style="margin-bottom:7px;padding:7px 9px;background:#080c12;border:1px solid #1a2535;border-radius:5px;">';
                 c+='<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;">Signal Panel</div>';
                 c+='<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">';
-                if(allThreeLock)c+='<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="ALL-3 LOCK: Mode B VW Tape, Mode A Conviction Engine, AND DNA Skip-Pattern all pick the same fighter. Strongest possible signal.">🔒 ALL-3 LOCK · '+pickName+'</span>';
+                if(allThreeLock)c+='<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="ALL-3 LOCK: Mode B VW Tape, Mode A Conviction Engine, AND DNA root sequence all pick the same fighter. Strongest possible signal.">🔒 ALL-3 LOCK · '+pickName+'</span>';
                 else if(tripleAlign)c+='<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="TRIPLE LOCK: Mode B VW Tape and Mode A Conviction Engine both agree independently. DNA sequence does not confirm (or unavailable).">🔐 TRIPLE LOCK · '+pickName+'</span>';
                 else if(modesAgree)c+='<span style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="A+B AGREE: Mode A (cipher conviction engine) and Mode B (VW tape scorer) both pick the same fighter independently using different methodologies.">🤝 A+B AGREE · '+pickName+'</span>';
                 else if(modeAWinner)c+='<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="SPLIT: Mode A conviction engine and composite winner disagree. Lower confidence — watch for upset.">⚠️ SPLIT</span>';
@@ -11298,6 +11350,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     var _tipDNA='DNA Pick: '+_dpName+'. Skip-pattern projects this fighter to win. Active roots: '+_rt11286b+'. Signs: '+dnaTag2+'. Method: '+_dmLabel+'.';
                     c+='<span style="background:'+dnaCol2+'22;border:1px solid '+dnaCol2+'44;color:'+dnaCol2+';font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="'+_tipDNA.replace(/"/g,"&quot;")+'">&#x1F9EC; DNA: '+_dpName+' '+dnaTag2+'</span>';
                 }
+                // ── DNA Variation Score badges ──
+                if(winnerDNA && winnerDNA.score>=3)c+='<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="DNA VAR STRONG ('+winnerDNA.score+'/4): '+winnerDNA.score+' of 4 name variations have their dominant cipher root on today\'s target roots. Strongest DNA variation alignment.">🧬 DNA VAR STRONG ('+winnerDNA.score+'/4)</span>';
+                else if(winnerDNA && winnerDNA.score===2)c+='<span style="background:#3b82f622;border:1px solid #3b82f655;color:#3b82f6;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="DNA VAR GOOD (2/4): 2 of 4 name variations hit today\'s target roots. Solid DNA alignment.">🧬 DNA VAR GOOD (2/4)</span>';
+                var _dnaDelta=(winnerDNA&&loserDNA)?winnerDNA.score-loserDNA.score:0;
+                if(_dnaDelta>=2)c+='<span style="background:#a78bfa22;border:1px solid #a78bfa55;color:#a78bfa;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="DNA VAR EDGE (+'+_dnaDelta+'): Winner has '+_dnaDelta+' more variation hits than loser on target roots. Strong DNA differential.">🧬 DNA EDGE +'+_dnaDelta+'</span>';
+                if(dnaAgreesComp&&dnaPick)c+='<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="DNA+V4 AGREE: Skip-pattern DNA pick agrees with V4 composite prediction. Confirmation from two independent signal paths.">🧬 DNA+V4 ✓</span>';
                 if(isLopsided)c+='<span style="background:#ff6b3522;border:1px solid #ff6b3555;color:#ff6b35;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="LOPSIDED: Winner dominates '+dominantTypes+' of 4 VW metric categories (UN/GD/LD/DPM). Strong vibrational alignment today.">🔥 LOPSIDED · '+pickName+'</span>';
                 if(trapTier===1)c+='<span style="background:#ef444422;border:1px solid #ef444455;color:#ef4444;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;cursor:help;" title="VOID LOCK (Tier 1): Both name variations trigger the gate AND 2+ top resonance calendars are in DPM trap mode. Highest-conviction upset signal.">☠️ VOID LOCK</span>';
                 else if(trapTier===2)c+='<span style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:help;" title="HIGH CONVICTION TRAP (Tier 2): Both name variations flagged + 1 top resonance calendar in trap mode.">⚡ TRAP T2</span>';
@@ -11653,6 +11711,11 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         var mrA_=_mr(nA), mrB_=_mr(nB);
                         var cA_= sA_.total + _dnaVarScore(pA_)*25 + (mrA_&&DNS_.indexOf(mrA_)!==-1?50:mrA_&&DNL_.indexOf(mrA_)!==-1?-35:0);
                         var cB_= sB_.total + _dnaVarScore(pB_)*25 + (mrB_&&DNS_.indexOf(mrB_)!==-1?50:mrB_&&DNL_.indexOf(mrB_)!==-1?-35:0);
+                        // Add ModeA to composite
+                        var _mmaModeA=null;try{_mmaModeA=computeModeAConviction(nA,nB,_mainFightDate||new Date());}catch(e){}
+                        function _mmaModePts(conv,agrees){if(!agrees)return 0;return conv>=96?60:conv>=90?50:conv>=85?40:conv>=80?30:conv>=70?10:0;}
+                        cA_+=_mmaModePts((_mmaModeA||{}).convPct||0,(_mmaModeA||{}).winner===nA);
+                        cB_+=_mmaModePts((_mmaModeA||{}).convPct||0,(_mmaModeA||{}).winner===nB);
                         return cA_ >= cB_ ? 'A' : 'B';
                     } catch(e) { return null; }
                 }
@@ -11664,6 +11727,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         var _mmaDate = f.eventDate || f.section_date || TODAY_DATE_STR;
                         var gameId = 'mma_' + f.nameA.replace(/\s/g,'').replace(/'/g,'') + '_' + f.nameB.replace(/\s/g,'').replace(/'/g,'') + '_' + _mmaDate;
                         if (accuracyTracker.predictions.has(gameId)) return; // already logged
+                        // Safety: if an old record exists with today's date but fight is future, delete it
+                        var _oldKey = 'mma_' + f.nameA.replace(/\s/g,'').replace(/'/g,'') + '_' + f.nameB.replace(/\s/g,'').replace(/'/g,'') + '_' + TODAY_DATE_STR;
+                        if (_mmaDate !== TODAY_DATE_STR && accuracyTracker.predictions.has(_oldKey)) {
+                            accuracyTracker.predictions.delete(_oldKey);
+                            console.log('🥊 Removed stale MMA record with wrong date:', _oldKey);
+                        }
                         var pA_ = buildTSPlayer(f.nameA), pB_ = buildTSPlayer(f.nameB);
                         var sA_ = scoreTSPlayer(pA_), sB_ = scoreTSPlayer(pB_);
                         var record = {
@@ -11671,7 +11740,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                             gameDate: new Date(_mmaDate+'T20:00:00').getTime(),
                             sport: 'mma', homeTeam: f.nameA, awayTeam: f.nameB,
                             isTapeMatch: true, gameTime: f.timeStr||f.section||'',
-                            predictedHomeWP: sA_.total >= sB_.total ? Math.round(sA_.total/(sA_.total+sB_.total)*100) : Math.round(sB_.total/(sA_.total+sB_.total)*100),
+                            predictedHomeWP: Math.round(sA_.total/(sA_.total+sB_.total)*100), // home team (A) actual %
                             v4Winner: pickedName, confidence: 55,
                             modelVersion: 'V4-Chronos', status: 'PENDING',
                             vegasSpread: null, actualHomeScore: null, actualAwayScore: null,
@@ -11721,6 +11790,25 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 // tapeGameDate: not mutated globally
                 var _mmaLocalVW = calculateAllCalendarsVW(_mainFightDate);
                 console.log('🥊 MMA VW set to:', _mainFightDate.toDateString(), '| DPM:', (allVW.gregorian||{}).dpm);
+
+                // ── Stale MMA record cleanup ──
+                // Delete ALL pending MMA predictions stored with today's date
+                // when the actual event is on a future date (name-order-safe)
+                var _actualEventDate = fights[0] && fights[0].eventDate;
+                if (_actualEventDate && _actualEventDate !== TODAY_DATE_STR) {
+                    var _todayPrefix = 'mma_';
+                    var _staleKeys = [];
+                    accuracyTracker.predictions.forEach(function(v, k) {
+                        if (v.sport === 'mma' && k.endsWith('_' + TODAY_DATE_STR)) {
+                            _staleKeys.push(k);
+                        }
+                    });
+                    if (_staleKeys.length > 0) {
+                        _staleKeys.forEach(function(k) { accuracyTracker.predictions.delete(k); });
+                        accuracyTracker.saveToStorage();
+                        console.log('🥊 Cleaned', _staleKeys.length, 'stale MMA records dated', TODAY_DATE_STR, '— event is actually', _actualEventDate);
+                    }
+                }
                 fights.forEach(function(f) {
                     // Auto-pick and pre-select
                     var autoPick = v4AutoPick(f.nameA, f.nameB);
@@ -11759,11 +11847,15 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     // tapeGameDate: not mutated globally
                     var _upcomingLocalVW = calculateAllCalendarsVW(_upcomingDate);
                     console.log('🥊 Upcoming MMA VW set to:', _upcomingDate.toDateString(), '| DPM:', (allVW.gregorian||{}).dpm);
+                // Clean any stale records dated today for upcoming fights
+                upcomingFights.forEach(function(uf){if(!uf||!uf.nameA||!uf.nameB)return;var _nd=nextDate||uf.eventDate;if(!_nd||_nd===TODAY_DATE_STR)return;var _sk='mma_'+(uf.nameA||'').replace(/[\s']/g,'')+'_'+(uf.nameB||'').replace(/[\s']/g,'')+'_'+TODAY_DATE_STR;if(accuracyTracker.predictions.has(_sk)){accuracyTracker.predictions.delete(_sk);console.log('🥊 Cleaned upcoming stale MMA record:',_sk);}});
                     upcomingFights.forEach(function(f) {
                         var autoPick = v4AutoPick(f.nameA, f.nameB);
                         var cId_ = 'mc_'+(f.nameA+f.nameB).replace(/[^a-zA-Z]/g,'').substring(0,24);
                         if (autoPick && !window._tapePicksMap[cId_]) window._tapePicksMap[cId_] = autoPick;
-                        autoLogFight(f, autoPick);
+                        // Force upcoming fights to use nextDate (not today's date)
+                        var _fWithDate = Object.assign({}, f, {eventDate: nextDate || f.eventDate});
+                        autoLogFight(_fWithDate, autoPick);
                         try { cardsHTML += buildMatchCard(f.nameA, f.nameB, f.timeStr, '', 'pre', Object.assign({}, f, {gameDate: _upcomingDate})); } catch(e) {}
                     });
                     cardsHTML += '</div>';
@@ -12090,7 +12182,17 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         if(m.b) window._fightMeta[m.b] = {rank:m.rankB||'', country:m.cB||'', flag:''};
                         var pA_=buildTSPlayer(m.a), pB_=buildTSPlayer(m.b);
                 var _savedVW=allVW; allVW=_localVW||allVW; var sA_=scoreTSPlayer(pA_), sB_=scoreTSPlayer(pB_); allVW=_savedVW;
-                        var autoPick = sA_.total >= sB_.total ? 'A' : 'B';
+                        // Full composite: VW + DNA var score + mascot root + ModeA (same as buildMatchCard)
+                var _obsRootsAP=(typeof getObservedDailyRoots==='function')?getObservedDailyRoots():{targets:[7,1,3],losers:[4,5]};
+                function _apMascotRoot(n){try{var p=n.trim().split(/\s+/),m=p[p.length-1],s=0;m.toUpperCase().replace(/[^A-Z]/g,'').split('').forEach(function(c){s+=c.charCodeAt(0)-64;});while(s>9)s=String(s).split('').reduce(function(a,d){return a+parseInt(d);},0);return s||null;}catch(e){return null;}}
+                function _apDnaVar(pl){var sc=0;Object.keys(pl.variations).forEach(function(vk){var rc={};Object.values(CIPHERS).forEach(function(fn){var r=calculateDigitalRoot(fn(pl.variations[vk])).root;rc[r]=(rc[r]||0)+1;});var dom=Object.keys(rc).map(Number).sort(function(a,b){return rc[b]-rc[a];})[0];if(dom&&_obsRootsAP.targets.indexOf(dom)!==-1)sc++;});return sc;}
+                function _apModeAPts(conv,agrees){if(!agrees)return 0;return conv>=96?60:conv>=90?50:conv>=85?40:conv>=80?30:conv>=75?20:conv>=70?10:0;}
+                var _apModeA=null;try{_apModeA=computeModeAConviction(m.a,m.b,_mDate2||new Date());}catch(e){}
+                var _apMrA=_apMascotRoot(m.a),_apMrB=_apMascotRoot(m.b);
+                var _apDNA_T=_obsRootsAP.targets,_apDNA_L=_obsRootsAP.losers;
+                var _apCompA=sA_.total+_apDnaVar(pA_)*25+(_apMrA&&_apDNA_T.indexOf(_apMrA)!==-1?50:_apMrA&&_apDNA_L.indexOf(_apMrA)!==-1?-35:0)+_apModeAPts((_apModeA||{}).convPct||0,(_apModeA||{}).winner===m.a);
+                var _apCompB=sB_.total+_apDnaVar(pB_)*25+(_apMrB&&_apDNA_T.indexOf(_apMrB)!==-1?50:_apMrB&&_apDNA_L.indexOf(_apMrB)!==-1?-35:0)+_apModeAPts((_apModeA||{}).convPct||0,(_apModeA||{}).winner===m.b);
+                var autoPick = _apCompA >= _apCompB ? 'A' : 'B';
                         var cId_='mc_'+(m.a+m.b).replace(/[^a-zA-Z]/g,'').substring(0,24);
                         if(!window._tapePicksMap[cId_]) window._tapePicksMap[cId_]=autoPick;
                         // Auto-log to accuracy tracker
@@ -12158,7 +12260,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                         gameDate:_mDate2.getTime(),
                                         sport:'tennis', homeTeam:m.a, awayTeam:m.b,
                                         isTapeMatch:true, gameTime:m.timeStr||'',
-                                        predictedHomeWP:sA_.total>=sB_.total?Math.round(sA_.total/(sA_.total+sB_.total)*100):Math.round(sB_.total/(sA_.total+sB_.total)*100),
+                                        predictedHomeWP:Math.round(_apCompA/(_apCompA+_apCompB)*100),
                                         v4Winner:pickedName2, confidence:v4ConvPct2,
                                         modelVersion:'V4-Chronos', status:'PENDING',
                                         vegasSpread:null, actualHomeScore:null, actualAwayScore:null,
@@ -12540,6 +12642,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             // ── Outcome Banner ──
             var bannerColor = winner === 'A' ? '#3b82f6' : winner === 'B' ? '#ef4444' : '#f59e0b';
             var bannerName  = winner === 'A' ? pA.name : winner === 'B' ? pB.name : 'TIE';
+                window._lastTapeDisplayWinner = bannerName !== 'TIE' ? bannerName : null;
 
             // ── Composite Score Banner (same as MMA/Tennis/Bracket tape) ──
             if (winner !== 'TIE') {
@@ -12616,14 +12719,14 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
 
             // ── Full Signal Panel — mirrors sidebar badge row ──
             out += '<div style="margin-top:12px;padding:10px 12px;background:#080c12;border:1px solid #1a2535;border-radius:6px;">';
-            out += '<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;cursor:help;" title="Signal Panel: summarises all prediction engines. ALL-3 LOCK = Mode A (cipher conviction) + Mode B (VW tape) + DNA skip-pattern all agree. TRIPLE = Mode A + Mode B agree, no DNA. A+B AGREE = both tape and conviction engine agree. SPLIT = engines disagree. Confidence % combines tape base + Mode A boost + trap penalty + DNA variation boost.">Signal Panel</div>';
+            out += '<div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;cursor:help;" title="Signal Panel: summarises all prediction engines. ALL-3 LOCK = Mode A (cipher conviction) + Mode B (VW tape) + DNA root sequence all agree. TRIPLE = Mode A + Mode B agree, no DNA. A+B AGREE = both tape and conviction engine agree. SPLIT = engines disagree. Confidence % combines tape base + Mode A boost + trap penalty + DNA variation boost.">Signal Panel</div>';
             out += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">';
 
             // Alignment badge
             if (allThreeLock) {
-                out += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;cursor:help;" title="ALL-3 LOCK: Mode B VW Tape, Mode A Conviction Engine, AND DNA Skip-Pattern sequence all independently pick the same player. This is the strongest signal in the system — three methodologies (vibrational scoring, cipher conviction, and root sequence analysis) all converging on one winner.">🔒 ALL-3 LOCK — V4+DNA+ModeA agree</span>';
+                out += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;cursor:help;" title="ALL-3 LOCK: Mode B VW Tape, Mode A Conviction Engine, AND DNA root sequence all independently pick the same player. This is the strongest signal in the system — three methodologies (vibrational scoring, cipher conviction, and root sequence analysis) all converging on one winner.">🔒 ALL-3 LOCK — V4+DNA+ModeA agree</span>';
             } else if (tripleAlign) {
-                out += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;cursor:help;" title="TRIPLE LOCK: Mode B VW Tape and Mode A Conviction Engine both independently pick the same player. DNA Skip-Pattern does not confirm (or is unavailable). Two independent methodologies agree — strong signal.">🔐 TRIPLE — V4+ModeA agree</span>';
+                out += '<span style="background:#10b98122;border:1px solid #10b98155;color:#10b981;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;cursor:help;" title="TRIPLE LOCK: Mode B VW Tape and Mode A Conviction Engine both independently pick the same player. DNA root sequence does not confirm (or is unavailable). Two independent methodologies agree — strong signal.">🔐 TRIPLE — V4+ModeA agree</span>';
             } else if (modesAgree) {
                 out += '<span style="background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;cursor:help;" title="A+B AGREE: Mode A (cipher conviction engine — runs 12 gematria ciphers × 4 name variations × 9 calendars) and Mode B (VW tape — vibrational weather scoring) both pick the same player using completely different methodologies. Good signal — engines independent but aligned.">🤝 A+B AGREE</span>';
             } else if (modeAWinnerName) {
@@ -12647,7 +12750,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             if (dnaPick) {
                 var dnaCol = dnaAgreesComp ? '#a78bfa' : '#f59e0b';
                 var dnaTag = dnaAgreesComp ? '✓V4' : '≠V4';
-                out += '<span style="background:' + dnaCol + '22;border:1px solid ' + dnaCol + '44;color:' + dnaCol + ';font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;cursor:help;" title="DNA SKIP-PATTERN PICK: The 6-day rolling sequence of dominant winner roots (tracked in the accuracy system) projects  + dnaPick.split( ).pop() +  to win today.  + (dnaAgreesComp ? ✓V4: Agrees with the composite prediction — strong confirmation. : ≠V4: Disagrees with the composite prediction — potential divergence signal. Watch carefully.) +  Method:  + (dnaMethod||sequence analysis) + .">🧬 DNA: ' + dnaPick.split(' ').pop() + ' ' + dnaTag + '</span>';
+                out += '<span style="background:' + dnaCol + '22;border:1px solid ' + dnaCol + '44;color:' + dnaCol + ';font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;cursor:help;" title="DNA SKIP-PATTERN PICK: Skip-pattern projects ' + dnaPick.split(' ').pop() + ' to win. ' + (dnaAgreesComp ? '\u2713V4: Agrees with V4 composite — strong confirmation.' : '\u2260V4: Skip-pattern differs from V4. Pattern is still accumulating data — treat as early signal, not a firm call today.') + ' Method: ' + (dnaMethod||'sequence analysis') + '.">\uD83E\uDDEC DNA: ' + dnaPick.split(' ').pop() + ' ' + dnaTag + '</span>';
             }
 
             // Lopsided badge
@@ -12770,7 +12873,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 {val:'mlb',  label:'⚾ MLB'},
                 {val:'soccer',label:'⚽ Soccer'},
                 {val:'tennis',label:'🎾 Tennis'},
-                {val:'mma',  label:'🥊 MMA'}
+                {val:'mma',  label:'🥊 MMA'},
+                {val:'lacrosse', label:'🥍 Lacrosse'},
+                {val:'cricket',  label:'🏏 Cricket'},
+                {val:'boxing',   label:'🥊 Boxing'},
+                {val:'esports',  label:'🎮 E-Sports'},
+                {val:'rugby',    label:'🏉 Rugby'}
             ];
             out += '<select id="tape-sport-select" style="background:#1a2535;color:#fff;border:1px solid #2a3142;border-radius:4px;padding:4px 8px;font-size:11px;cursor:pointer;">';
             sportOptions.forEach(function(opt) {
@@ -12862,7 +12970,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 var rowBg = rowHasData ? '#0d1117' : '#090c12';
                 out += '<div style="display: grid; grid-template-columns: 95px repeat(4, 1fr) 60px repeat(4, 1fr) 60px; gap: 3px; align-items: center;' +
                        ' padding: 5px 6px; background: ' + rowBg + '; border-radius: 3px; margin-bottom: 2px;">';
-                out += '<span style="color: ' + (rowHasData ? '#c5cad6' : '#3a4155') + '; font-size: 10px; font-weight: 600;">' + CAL_LABELS[calName] + '</span>';
+                out += '<span style="color: ' + (rowHasData ? '#c5cad6' : '#3a4155') + '; font-size: 10px; font-weight: 600;">' + (CAL_LABELS[calName]||calName) + '</span>';
                 // Player A cols
                 VW_TYPES.forEach(function(t) {
                     var v = cA[t]; var color = VW_COLORS[t];
@@ -13269,10 +13377,10 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 // Final adjusted confidence
                 tapeConfFinal:    (window._lastTapeConf || 0) || (total > 0 ? Math.round(Math.max(scoreA, scoreB) / total * 100) : 50),
                 // V4 winner = merged winner (best pick)
-                v4Winner:         (window._lastTapeMerge || {}).winner || (scoreA >= scoreB ? playerA : playerB),
-                v4ConvictionPct:  (window._lastTapeConf || 0)
+                v4Winner:         window._lastTapeDisplayWinner || (window._lastTapeMerge || {}).winner || (scoreA >= scoreB ? playerA : playerB),
+                v4ConvictionPct:  (window._lastTapeConf || 0),
+                manualSave:       true
             };
-
             accuracyTracker.predictions.set(gameId, record);
             accuracyTracker.saveToStorage();
             console.log('📋 Tape prediction saved:', playerA, 'vs', playerB,
@@ -13492,7 +13600,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 summaryHtml += '<div style="display: grid; grid-template-columns: 105px repeat(4, 1fr) 54px; gap: 4px; align-items: center;' +
                                ' padding: 7px 8px; background: ' + rowBg + '; border: 1px solid ' + rowBorder + ';' +
                                ' border-radius: 4px; margin-bottom: 3px;">';
-                summaryHtml += '<span style="color: ' + (calTotal > 0 ? '#c5cad6' : '#4a5568') + '; font-size: 11px; font-weight: 600;">' + CAL_LABELS[calName] + '</span>';
+                summaryHtml += '<span style="color: ' + (calTotal > 0 ? '#c5cad6' : '#4a5568') + '; font-size: 11px; font-weight: 600;">' + (CAL_LABELS[calName]||calName) + '</span>';
 
                 var vwTypeMap = [['UN', vw.un, cal.UN], ['GD', vw.gd, cal.GD], ['LD', vw.ld, cal.LD], ['DPM', vw.dpm, cal.DPM]];
                 vwTypeMap.forEach(function(item) {
@@ -15331,12 +15439,23 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     if (dr) { dnaPick=dr.pick; dnaMethod=dr.method; }
                 } catch(e) {}
 
-                // ── Vegas fav ──
+        // ── Vegas fav — prefer stored record, fall back to gwEntry.data.odds ──
                 let vegasFav = null;
                 try {
-                    if (gwEntry&&gwEntry.data&&gwEntry.data.odds) {
-                        const odds=(gwEntry.data.odds||[])[0]||gwEntry.data.odds;
-                        if (odds&&odds.spread!=null) { const vs=parseFloat(odds.spread); if(!isNaN(vs)) vegasFav=vs<0?ht:at; }
+                    // First: try stored prediction's vegasSpread (always available)
+                    const _storedVegas = _stored && _stored.vegasSpread != null ? _stored.vegasSpread
+                        : (gwEntry && gwEntry.data && gwEntry.data.vegasSpread != null ? gwEntry.data.vegasSpread : null);
+                    if (_storedVegas != null) {
+                        const vs = parseFloat(_storedVegas);
+                        if (!isNaN(vs) && vs !== 0) vegasFav = vs < 0 ? ht : at;
+                    }
+                    // Fallback: gwEntry.data.odds (only set when sidebar rendered)
+                    if (!vegasFav && gwEntry && gwEntry.data && gwEntry.data.odds) {
+                        const odds = (gwEntry.data.odds||[])[0] || gwEntry.data.odds;
+                        if (odds && odds.spread != null) {
+                            const vs2 = parseFloat(odds.spread);
+                            if (!isNaN(vs2) && vs2 !== 0) vegasFav = vs2 < 0 ? ht : at;
+                        }
                     }
                 } catch(e) {}
 
@@ -15354,14 +15473,17 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 const v4v2VegasAll = v4pick && v2pick && vegasFav && v4pick===v2pick && v4pick===vegasFav;
                 const v4v2Only     = v4pick && v2pick && v4pick===v2pick;
                 const v4VegasOnly  = v4pick && vegasFav && v4pick===vegasFav;
-                // quadLock requires Vegas — never fire on sports with no spread (MLB etc)
-                const derivedQuad        = ((quadLock||false) && vegasFav!==null) || v4v2VegasAll;
-                // ALL-3 LOCK: requires stored sidebar flag (Mode A+B+V2) OR V4+V2+Vegas all agree
-                // Do NOT fire on V4+V2 alone — that produces false signals when Vegas disagrees
-                const derivedAllThreeLock= (allThreeLock||false)   || v4v2VegasAll;
+                // ALL-3 LOCK: requires stored sidebar flag OR V4+V2+Vegas all agree
+                const derivedAllThreeLock= (allThreeLock||false) || v4v2VegasAll;
+                // TRIPLE LOCK: V4+V2 agree (no Vegas required)
+                const derivedTripleAlign = (tripleAlign||false)  || (v4v2Only && !v4v2VegasAll);
+                // QUAD LOCK: allThreeLock AND Vegas present
+                const derivedQuad = ((
+                    (quadLock||false) ||
+                    (allThreeLock && tripleAlign) ||
+                    (derivedAllThreeLock && v4v2VegasAll)
+                ) && vegasFav !== null);
                 // TRIPLE LOCK: V4+V2 agree (no Vegas required) — renamed from old ALL-3
-                const derivedTripleAlign = (tripleAlign||false)    || (v4v2Only && !v4v2VegasAll);
-                // UPSET ALERT: V4+V2 both pick the Vegas underdog — engines overriding the market
                 const derivedUpset = (upsetAlert||false) || (v4pick && v2pick && vegasFav && v4pick===v2pick && v4pick!==vegasFav && !derivedAllThreeLock && !derivedQuad);
 
                 games.push({ gid, ht, at, sp, timeStr, dateKey, dateLabel, isGameToday,
@@ -15479,18 +15601,25 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
 
                 // ── Per-team DNA root computation ──
                 function getTeamDNARoot(name) {
-                    // Compute dominant cipher root for this team's mascot (most predictive variation)
-                    try {
-                        var parts = name.trim().split(/\s+/);
-                        var mascot = parts[parts.length-1] || name;
-                        var rootCounts = {};
+                // Compute dominant cipher root — all 4 variations × 12 ciphers (matches V4 sidebar)
+                try {
+                    var parts = name.trim().split(/\s+/);
+                    var vars = {
+                        full:   name,
+                        city:   parts.length>1 ? parts.slice(0,-1).join(' ') : name,
+                        mascot: parts[parts.length-1] || name,
+                        abbrev: parts.map(function(p){return p[0]||'';}).join('').toUpperCase()
+                    };
+                    var rootCounts = {};
+                    Object.values(vars).forEach(function(v) {
                         Object.keys(CIPHERS).forEach(function(ck) {
-                            var r = calculateDigitalRoot(CIPHERS[ck](mascot)).root;
+                            var r = calculateDigitalRoot(CIPHERS[ck](v)).root;
                             if (r >= 1 && r <= 9) rootCounts[r] = (rootCounts[r]||0)+1;
                         });
-                        var dom = Object.keys(rootCounts).map(Number).sort(function(a,b){ return rootCounts[b]-rootCounts[a]; })[0];
-                        return { root: dom, count: rootCounts[dom]||0, total: Object.keys(CIPHERS).length };
-                    } catch(e) { return null; }
+                    });
+                    var dom = Object.keys(rootCounts).map(Number).sort(function(a,b){ return rootCounts[b]-rootCounts[a]; })[0];
+                    return { root: dom, count: rootCounts[dom]||0, total: Object.keys(CIPHERS).length * 4 };
+                } catch(e) { return null; }
                 }
                 // Dynamic roots from observed game results (today → yesterday → cache → fallback)
                 var _obsM = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
@@ -15550,12 +15679,14 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         var dnaIsSecondary = dnaRoot && DNA_SEC.indexOf(dnaRoot) !== -1 && !dnaOnTarget && !dnaIsLoser;
                         var dnaCol = dnaOnTarget ? '#a78bfa' : dnaIsSecondary ? '#10b981' : dnaIsLoser ? '#ef4444' : '#f59e0b';
                         var dnaAlignLabel = dnaOnTarget ? '🧬 DNA·R'+dnaRoot : dnaIsSecondary ? '🧬 DNA·R'+dnaRoot : dnaIsLoser ? '🧬 DNA·R'+dnaRoot : '🧬 DNA·R'+dnaRoot;
-                        var dnaTip = 'DNA SEQUENCE PICK: 6-day skip-pattern projects this team to win today.' +
-                            (dnaRoot ? ' Mascot cipher root: R' + dnaRoot + '.' : '') +
-                            (dnaOnTarget   ? ' ✅ TIER 1 — R' + dnaRoot + ' is a primary target root (7/1/3). Sequence AND root fully aligned. Strongest DNA signal.' :
-                             dnaIsSecondary ? ' ✅ TIER 2 — R' + dnaRoot + ' is a secondary positive root (R6, present in ~50% of winners via LD=1). Good alignment.' :
-                             dnaIsLoser    ? ' ⚠️ TIER CONFLICT — R' + dnaRoot + ' is a loser root signal today (R4/R5). Sequence pick but root works against them — lower confidence.' :
-                             dnaRoot       ? ' ⚡ TIER 3 — R' + dnaRoot + ' is neutral today. Sequence pick only — no root reinforcement.' : '');
+                var _dnaTargetStr = DNA_T && DNA_T.length ? 'R'+DNA_T.join('/R') : '?';
+                var _dnaLoserStr  = DNA_L && DNA_L.length ? 'R'+DNA_L.join('/R') : '?';
+                var dnaTip = 'DNA SEQUENCE PICK: Todays observed winning roots (' + _dnaTargetStr + ') project this team to win.' +
+                    (dnaRoot ? ' Mascot cipher root: R' + dnaRoot + '.' : '') +
+                    (dnaOnTarget   ? ' TIER 1 — R' + dnaRoot + ' is a primary target root today (' + _dnaTargetStr + '). Sequence AND root fully aligned. Strongest DNA signal.' :
+                    dnaIsSecondary ? ' TIER 2 — R' + dnaRoot + ' is a secondary positive root (R6, LD=1 constant). Good alignment.' :
+                    dnaIsLoser    ? ' TIER CONFLICT — R' + dnaRoot + ' is a loser root today (' + _dnaLoserStr + '). Sequence pick but root works against it.' :
+                    dnaRoot       ? ' TIER 3 — R' + dnaRoot + ' is neutral today. Sequence pick only — no root reinforcement.' : '');
                         tags.push('<span title="'+dnaTip+'" style="color:'+dnaCol+';font-size:9px;font-weight:800;cursor:help;background:'+dnaCol+'18;border:1px solid '+dnaCol+'55;border-radius:3px;padding:1px 5px;">'+dnaAlignLabel+'</span>');
                     }
                     // Signal 2: Root resonance (does THIS team's mascot root land on todays targets?)
@@ -15593,8 +15724,14 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     }
                     if (isUpsetPick)
                         teamBadges.push('<span title="UPSET ALERT: V4 picks this team but Vegas has them as underdog." style="display:block;margin-top:3px;font-size:9px;font-weight:800;color:#f59e0b;background:#f59e0b11;border:1px solid #f59e0b44;border-radius:3px;padding:1px 5px;cursor:help;">⚡ UPSET</span>');
-                    if (g.v4dnaAgree === false && isV4)
-                        teamBadges.push('<span title="DNA DISAGREES: Skip-pattern picks the opponent instead." style="display:block;margin-top:3px;font-size:9px;color:#f59e0b;cursor:help;">DNA≠V4</span>');
+                // DNA≠V4 badge suppressed — DNA VAR badges handle this signal instead
+                // VPT+DNA Alignment badge
+                try {
+                    var _vptM = checkVPTDNAAlign(name);
+                    if (_vptM && _vptM.aligned && isV4) {
+                        teamBadges.push('<span title="VPT+DNA ALIGNED: Both VPT cipher frequency (R'+_vptM.vptRoot+') and DNA dominant root (R'+_vptM.dnaRoot+') hit todays target roots ('+_vptM.targets.map(function(r){return 'R'+r;}).join('/')+'). Dual-system convergence." style="display:block;margin-top:3px;font-size:9px;font-weight:800;color:#f59e0b;background:#f59e0b11;border:1px solid #f59e0b44;border-radius:3px;padding:1px 5px;cursor:help;">⚡🧬 VPT+DNA</span>');
+                    }
+                } catch(e) {}
                     if (teamBadges.length) b += teamBadges.join('');
 
                     if (isMyPick) b += '<div style="font-size:9px;color:#10b981;font-weight:800;margin-top:3px;">✓ MY PICK</div>';
@@ -16708,6 +16845,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 { key:'skip_v4_split',  label:'🧬 DNA≠V4',           color:'#ef4444', tier:'flag',
                   desc:'Skip-pattern and V4 pick different teams. High interest divergence.',
                   test: function(g){ return g.skipPatternPick && g.v4Winner && g.skipPatternPick !== g.v4Winner; }},
+                { key:'vpt_dna_align', label:'⚡🧬 VPT+DNA', color:'#fbbf24', tier:'flag',
+                  desc:'Both the VPT cipher frequency root AND DNA dominant root of the predicted winner are confirmed target roots. Dual-system convergence.',
+                  test: function(g){ return !!(g.vptDnaAlign); }},
                 { key:'trap_tier1',    label:'☠️ VOID LOCK (Tier 1)',  color:'#ef4444', tier:'flag',
                   desc:'Both name variations flagged + 2+ top calendars in DPM trap mode. Highest-conviction upset signal.',
                   test: function(g){ return g.trapTier === 1; }},
@@ -17072,7 +17212,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             if (report.gamesTracked === 0) {
                 // Build placeholder stubs so the full layout renders before data arrives.
                 // This lets you preview the layout and see it populate in real time.
-                const sportNames = { nba: 'NBA', nfl: 'NFL', cbb: 'College Basketball', cfb: 'College Football', nhl: 'NHL', mlb: 'MLB', soccer: 'Soccer', tennis: '🎾 Tennis', mma: '🥊 MMA / UFC' };
+                const sportNames = { nba: 'NBA', nfl: 'NFL', cbb: 'College Basketball', cfb: 'College Football', nhl: 'NHL', mlb: 'MLB', soccer: 'Soccer', tennis: '🎾 Tennis', mma: '🥊 MMA / UFC', lacrosse: '🥍 Lacrosse', cricket: '🏏 Cricket', boxing: '🥊 Boxing', esports: '🎮 E-Sports', rugby: '🏉 Rugby' };
                 report.overall = {
                     gamesTracked: 0,
                     winLossRecord: { record: '0-0', winRate: 'N/A' },
@@ -17080,7 +17220,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     totalAccuracy: { modelWinRate: 'N/A' },
                     avgWPError: '—', avgSpreadError: '—', avgTotalError: '—'
                 };
-                ['nba','nfl','cbb','cfb','nhl','mlb','soccer','tennis','mma'].forEach(s => {
+                ['nba','nfl','cbb','cfb','nhl','mlb','soccer','tennis','mma','lacrosse','cricket','boxing','esports','rugby'].forEach(s => {
                     report[s] = { gamesTracked: 0, sportName: sportNames[s] || s.toUpperCase(),
                         winLossRecord: { record: '0-0', winRate: 'N/A' },
                         spreadAccuracy: { modelWinRate: 'N/A' }, totalAccuracy: { modelWinRate: 'N/A' },
@@ -17095,7 +17235,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 // Do NOT return — fall through to the full layout renderer
             }
             // Always ensure all sport keys exist (safety net for any missing sports)
-            ['nba','nfl','cbb','cfb','nhl','mlb','soccer','tennis','mma'].forEach(s => {
+            ['nba','nfl','cbb','cfb','nhl','mlb','soccer','tennis','mma','lacrosse','cricket','boxing','esports','rugby'].forEach(s => {
                 if (!report[s]) report[s] = { gamesTracked: 0, sportName: s.toUpperCase(),
                     winLossRecord: { record: '0-0', winRate: 'N/A' },
                     spreadAccuracy: { modelWinRate: 'N/A' }, totalAccuracy: { modelWinRate: 'N/A' },
@@ -17141,6 +17281,8 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                 <button onclick="renderDNARootMatrix()" style="background:#a78bfa22;border:1px solid #a78bfa55;color:#a78bfa;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;" title="DNA Root W/L Matrix: See which cipher roots (1-9) dominated todays winners vs losers. Then view remaining matchups with root alignment predictions.">🧬 DNA Root Matrix</button>
                                 <button onclick="renderUpsetAnalysis()" style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;" title="Upset Analysis: Every game where UPSET badge fired — did the underdog win outright? Cover the spread? By how many points? Use to calibrate UPSET OUTRIGHT vs WILL COVER badge rules.">⚡ Upset Analysis</button>
                                 <button onclick="renderCalendarLeaderboard()" style="background:#10b98122;border:1px solid #10b98155;color:#10b981;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;" title="Calendar Match Leaderboard: Which calendar system best predicted the actual winning root numbers each day? Aggregated across all tracked dates.">📅 Calendar Leaderboard</button>
+                                <button onclick="renderV4V2Framework()" style="background:#3b82f622;border:1px solid #3b82f655;color:#3b82f6;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;" title="V4 vs V2 Decision Framework: Dynamic analysis of when each model outperforms the other, with Vegas alignment. Auto-updates as new results are tracked.">⚔️ V4 vs V2 Framework</button>
+                                <button onclick="renderVPRanking()" style="background:#fbbf2422;border:1px solid #fbbf2455;color:#fbbf24;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;" title="Vibrational Power Ranking: Live daily power score for every team playing today based on badge signals, DNA/VPT root alignment, calendar resonance, and composite strength.">⚡ Power Ranking</button>
                                 <button onclick="renderSkipPatternFinder()" style="background:#a78bfa22;border:1px solid #a78bfa55;color:#a78bfa;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;" title="Skip Pattern Sequence Finder: Track day-to-day winning root patterns, VW alignment hit rates, and root transition sequences to find emerging predictive patterns.">🔮 Skip Pattern</button>
                             </div>
                         </div>
@@ -17816,9 +17958,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             `;
             
             // Sports excluded from overall but shown with their own card
-            const COUNT_ONLY_SPORTS = new Set(['mlb','soccer','tennis','mma']);
+            const COUNT_ONLY_SPORTS = new Set(['mlb','soccer','tennis','mma','lacrosse','cricket','boxing','esports','rugby']);
             // Sport cards
-            ['nba', 'nfl', 'cbb', 'cfb', 'nhl', 'mlb', 'soccer', 'tennis', 'mma'].forEach(sport => {
+            ['nba', 'nfl', 'cbb', 'cfb', 'nhl', 'mlb', 'soccer', 'tennis', 'mma', 'lacrosse', 'cricket', 'boxing', 'esports', 'rugby'].forEach(sport => {
                 const sportReport = report[sport];
                 const isCountOnly = COUNT_ONLY_SPORTS.has(sport);
                 
@@ -17971,7 +18113,11 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
 
                     if (isTape) {
                         const tapeTotal = (game.tapeScoreA || 0) + (game.tapeScoreB || 0);
-                        const predWinnerTape = tapeTotal > 0 && (game.tapeScoreA || 0) > (game.tapeScoreB || 0) ? game.homeTeam : game.awayTeam;
+                        // Use stored v4Winner (composite pick) — NOT raw tapeScoreA vs B which ignores ModeA/LP/DNA
+                        // Use v4Winner only for manually saved tape predictions (have modeAWinner set from full tape run)
+                        const predWinnerTape = (game.manualSave && game.v4Winner)
+                            ? game.v4Winner
+                            : (tapeTotal > 0 && (game.tapeScoreA || 0) > (game.tapeScoreB || 0) ? game.homeTeam : game.awayTeam);
                         const predLoserTape  = predWinnerTape === game.homeTeam ? game.awayTeam : game.homeTeam;
                         const winnerScoreTape = predWinnerTape === game.homeTeam ? (game.tapeScoreA || 0) : (game.tapeScoreB || 0);
                         const loserScoreTape  = predWinnerTape === game.homeTeam ? (game.tapeScoreB || 0) : (game.tapeScoreA || 0);
@@ -18012,7 +18158,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                     (game.allThreeLock ? '<span style="font-size:9px;font-weight:800;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 6px;color:#10b981;cursor:help;" title="ALL-3 LOCK: Mode A conviction, Mode B VW tape, and V2 statistical all agree on the same team. Strongest lock signal.">🔒 ALL-3 LOCK</span>' : '') +
                                     (!game.allThreeLock && game.tripleAlign ? '<span style="font-size:9px;font-weight:800;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 6px;color:#10b981;cursor:help;" title="TRIPLE LOCK: V4, V2, and Vegas all agree. Three external signals aligned.">🔐 TRIPLE</span>' : '') +
                                     (!game.allThreeLock && !game.tripleAlign && game.modesAgree ? '<span style="font-size:9px;background:#a78bfa22;border:1px solid #a78bfa44;border-radius:3px;padding:1px 6px;color:#a78bfa;cursor:help;" title="A+B AGREE: Mode A conviction and Mode B VW tape both picked the same team.">🤝 A+B</span>' : '') +
-                                    (game.skipPatternPick ? '<span style="font-size:9px;background:#10b98122;border:1px solid #10b98133;border-radius:3px;padding:1px 6px;color:#10b981;cursor:help;" title="DNA Skip-Pattern Pick: The rolling sequence of dominant winner roots projects this fighter/team to win. When DNA agrees with the composite pick it adds +20 to the composite score.">🧬 DNA: ' + game.skipPatternPick.split(' ').pop() + '</span>' : '') +
+                                    (game.skipPatternPick ? '<span style="font-size:9px;background:#10b98122;border:1px solid #10b98133;border-radius:3px;padding:1px 6px;color:#10b981;cursor:help;" title="DNA Root Pick: Todays observed winning roots project this team to win. When DNA agrees with the composite pick it adds +20 to the composite score.">🧬 DNA: ' + game.skipPatternPick.split(' ').pop() + '</span>' : '') +
                                     (game.isLopsided ? '<span style="font-size:9px;background:#ff6b3522;border:1px solid #ff6b3544;border-radius:3px;padding:1px 6px;color:#ff6b35;">🔥 LOPSIDED</span>' : '') +
                                     (game.trapTier === 1 ? '<span style="font-size:9px;font-weight:800;background:#ef444422;border:1px solid #ef444455;border-radius:3px;padding:1px 6px;color:#ef4444;cursor:help;" title="VOID LOCK (Trap Tier 1): Both name variations trigger gate AND 2+ resonance calendars in trap mode. Highest upset risk.">☠️ VOID LOCK</span>' : '') +
                                     (game.trapTier === 2 ? '<span style="font-size:9px;background:#f59e0b22;border:1px solid #f59e0b55;border-radius:3px;padding:1px 6px;color:#f59e0b;cursor:help;" title="TRAP T2 (Tier 2): Both variations agree on the gate AND 1 resonance calendar in trap mode. Strong upset signal.">⚡ TRAP T2</span>' : '') +
@@ -18042,7 +18188,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     else if(game.allThreeLock) pendingSignals.push('<span style="font-size:9px;font-weight:800;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 6px;color:#10b981;cursor:help;" title="ALL-3 LOCK: Mode A conviction engine, Mode B VW tape, and V2 statistical model all independently picked the same team. Strongest lock signal.">🔒 ALL-3 LOCK</span>');
                     else if(game.tripleAlign)  pendingSignals.push('<span style="font-size:9px;font-weight:800;background:#10b98122;border:1px solid #10b98155;border-radius:3px;padding:1px 6px;color:#10b981;cursor:help;" title="TRIPLE LOCK: V4, V2, and Vegas all agree on the same winner. All three external signals aligned.">🔐 TRIPLE LOCK</span>');
                     else if(game.modesAgree)   pendingSignals.push('<span style="font-size:9px;background:#a78bfa22;border:1px solid #a78bfa44;border-radius:3px;padding:1px 6px;color:#a78bfa;cursor:help;" title="A+B AGREE: Mode A conviction engine and Mode B VW tape both independently picked the same team. V2 statistical not checked.">🤝 A+B AGREE</span>');
-                    if (game.skipPatternPick)  pendingSignals.push('<span style="font-size:9px;background:#a78bfa22;border:1px solid #a78bfa33;border-radius:3px;padding:1px 6px;color:#a78bfa;">🧬 DNA: '+game.skipPatternPick.split(' ').pop()+'</span>');
+                    if (game.skipPatternPick && game.dnaMatchesV4)  pendingSignals.push('<span style="font-size:9px;background:#a78bfa22;border:1px solid #a78bfa33;border-radius:3px;padding:1px 6px;color:#a78bfa;">🧬 DNA: '+game.skipPatternPick.split(' ').pop()+'</span>');
                     if (game.v4ConvictionLabel){ var vlab=game.v4ConvictionLabel.replace(/[^ -~]/g,'').trim(); if(vlab) pendingSignals.push('<span style="font-size:9px;background:#667eea22;border:1px solid #667eea33;border-radius:3px;padding:1px 6px;color:#667eea;">'+(game.v4ConvictionPct||''?game.v4ConvictionPct+'% ':'') + vlab+'</span>'); }
                     if (game.trapTier===1)     pendingSignals.push('<span style="font-size:9px;font-weight:800;background:#ef444422;border:1px solid #ef444455;border-radius:3px;padding:1px 6px;color:#ef4444;cursor:help;" title="VOID LOCK (Trap Tier 1): Both name variations trigger the ordinal gate AND 2+ resonance calendars in DPM trap mode. Highest upset risk — the statistical favourite is vulnerable.">☠️ VOID LOCK</span>');
                     else if(game.trapTier===2)  pendingSignals.push('<span style="font-size:9px;background:#f59e0b22;border:1px solid #f59e0b55;border-radius:3px;padding:1px 6px;color:#f59e0b;cursor:help;" title="TRAP T2 (Tier 2): Both variations agree on the gate AND 1 resonance calendar in trap mode. Strong upset signal — watch before committing.">⚡ TRAP T2</span>');
@@ -18158,7 +18304,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         <div class="filter-group">
                             <label class="filter-label">Sport</label>
                             <div class="filter-chips">
-                                ${['NBA', 'NFL', 'CBB', 'CFB', 'NHL', 'MLB', 'SOCCER', 'TENNIS', 'MMA'].map(sport => `
+                                ${['NBA', 'NFL', 'CBB', 'CFB', 'NHL', 'MLB', 'SOCCER', 'TENNIS', 'MMA', 'LACROSSE', 'CRICKET', 'BOXING', 'ESPORTS', 'RUGBY'].map(sport => `
                                     <div class="filter-chip ${accuracyFilters.sports.has(sport) ? 'active' : ''}" 
                                          onclick="toggleFilterChip(accuracyFilters.sports, '${sport}')">
                                         ${sport === 'TENNIS' ? '🎾 ' : sport === 'MMA' ? '🥊 ' : sport === 'SOCCER' ? '⚽ ' : ''}${sport}
@@ -18268,7 +18414,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             
             // Recent results - USE FILTERED AND SORTED RESULTS
             if (sortedResults && sortedResults.length > 0) {
-                const displayResults = sortedResults.slice(0, 100); // Show max 100 in table
+                const displayResults = sortedResults.slice(0, 250); // Show max 250 in table
                 
                 html += `
                     <div class="recent-results">
@@ -18284,11 +18430,16 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                             <span style="background:rgba(239,68,68,0.15);border:1px solid #ef444455;border-radius:4px;padding:2px 8px;font-size:11px;color:#ef4444;">🔴 Both Missed</span>
                         `}
                         </div>
-                        <h3>${activeFilterCount > 0 ? 'Filtered' : 'Recent'} Results (${sortedResults.length > 100 ? 'Showing 100 of ' + sortedResults.length : sortedResults.length} Games)</h3>
+                        <h3>${activeFilterCount > 0 ? 'Filtered' : 'Recent'} Results (${sortedResults.length > 100 ? 'Showing 250 of ' + sortedResults.length : sortedResults.length} Games)</h3>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;min-height:24px;">
+                            <button id="results-bulk-delete-btn" onclick="bulkDeleteResults()" style="display:none;background:#2a0a0a;border:1px solid #ef444455;color:#ef4444;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">🗑 Delete Selected</button>
+                            <span id="results-selected-count" style="font-size:10px;color:#4a5568;"></span>
+                        </div>
                         <div class="results-table" style="overflow-x: auto; overflow-y: auto; max-height: 600px;">
                             <table style="font-size: 12px; border-collapse: separate; border-spacing: 0;">
                                 <thead>
                                     <tr>
+                                        <th style="width:28px;padding:4px 6px;"><input type="checkbox" id="results-select-all" onchange="(function(cb){var cbs=document.getElementsByClassName('result-row-cb');for(var x=0;x<cbs.length;x++)cbs[x].checked=cb.checked;updateResultsBulkBtn();})(this)" style="accent-color:#a78bfa;cursor:pointer;" title="Select all"></th>
                                         <th class="sortable ${accuracyFilters.sortColumn === 'date' ? 'sorted-' + accuracyFilters.sortDirection : ''}" onclick="sortAccuracyTable('date')">Date</th>
                                         <th class="sortable ${accuracyFilters.sortColumn === 'team' ? 'sorted-' + accuracyFilters.sortDirection : ''}" onclick="sortAccuracyTable('team')">Game</th>
                                         <th class="sortable ${accuracyFilters.sortColumn === 'sport' ? 'sorted-' + accuracyFilters.sortDirection : ''}" onclick="sortAccuracyTable('sport')">Sport</th>
@@ -18338,9 +18489,10 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     // Non-tape rows: use last word only to keep columns compact
                     const homeTeamShort = isTapeRow ? game.homeTeam : game.homeTeam.split(' ').pop();
                     const awayTeamShort = isTapeRow ? game.awayTeam : game.awayTeam.split(' ').pop();
-                    // Tape rows: >= 50 (tie goes to home/playerA); non-tape: > 50
-                    const predictedWinner = (isTapeRow ? game.predictedHomeWP >= 50 : game.predictedHomeWP > 50)
-                        ? homeTeamShort : awayTeamShort;
+                    // Use v4Winner for manually saved tape records; raw scores for auto-logged
+                    const predictedWinner = (isTapeRow && game.manualSave && game.v4Winner)
+                        ? (game.v4Winner === game.homeTeam ? homeTeamShort : awayTeamShort)
+                        : ((isTapeRow ? game.predictedHomeWP >= 50 : game.predictedHomeWP > 50) ? homeTeamShort : awayTeamShort);
                     const actualWinner = game.homeWon ? homeTeamShort : awayTeamShort;
                     const v2Correct = predictedWinner === actualWinner;
 
@@ -18369,6 +18521,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                 : 'background: rgba(239, 68, 68, 0.1);';
                     }
                     
+                // Quad Lock overrides row color — gold bg, red text if wrong
+                if (game.quadLock) {
+                    // Gold background always — text color handled separately in the row
+                    rowBg = 'background: rgba(245,158,11,0.18); border-left: 3px solid #f59e0b;';
+                }
+
                     // Calculate edge
                     const edge = game.vegasSpread !== null && game.predictedSpread !== null 
                         ? (game.vegasSpread - game.predictedSpread).toFixed(1) 
@@ -18383,15 +18541,17 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         ? '<span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">V2</span>'
                         : '<span style="background: #6b7280; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">V1</span>';
                     
+                    const _safeGid = (game.gameId||'').replace(/[^a-zA-Z0-9_]/g,'');
                     html += `
-                        <tr style="${rowBg}">
-                            <td>${gameDate}</td>
+                        <tr style="${rowBg}${game.quadLock && !v2Correct ? 'color:#ef4444;' : ''}" data-gameid="${_safeGid}"> 
+                            <td style="text-align:center;padding:4px 6px;"><input type="checkbox" class="result-row-cb" data-gameid="${_safeGid}" onchange="updateResultsBulkBtn()" style="accent-color:#a78bfa;cursor:pointer;"></td>
+                            <td style="white-space:nowrap;color:#8b92a7;font-size:11px;">${gameDate}</td>
                             <td>${isTapeRow ? tapeEmoji + homeTeamFull + ' vs ' + awayTeamFull : awayTeamFull + ' @ ' + homeTeamFull}</td>
                             <td>${tapeEmoji}${game.sport.toUpperCase()}</td>
                             <td>${modelBadge}</td>
                             <td style="font-weight: bold; color: ${v2Correct ? '#10b981' : '#ef4444'};">
                                 ${predictedWinner}
-                                ${(!v2Correct && v4WinnerComp) ? '<br><span style="font-size:10px;color:' + (v4Correct ? '#3b82f6' : '#6b7280') + ';">' + (v4Correct ? '✓' : '✗') + ' V4: ' + v4WinnerComp + '</span>' : ''}
+                                ${(!isTapeRow && !v2Correct && v4WinnerComp) ? '<br><span style="font-size:10px;color:' + (v4Correct ? '#3b82f6' : '#6b7280') + ';">' + (v4Correct ? '✓' : '✗') + ' V4: ' + v4WinnerComp + '</span>' : ''}
                                 ${(() => {
                                     // Triple lock badge in results row
                                     const gVegasFav = (game.vegasSpread !== null && game.vegasSpread !== undefined)
@@ -18399,10 +18559,13 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                         : null;
                                     const gV4Short = game.v4Winner
                                         ? (isTapeRow ? game.v4Winner : game.v4Winner.split(' ').pop()) : null;
+                                    if (game.quadLock) return '<br><span style="font-size:9px;font-weight:800;color:#f59e0b;">⚡ QUAD LOCK</span>';
+                                    if (game.vptDnaAlign) return '<br><span style="font-size:9px;font-weight:800;color:#fbbf24;">⚡🧬 VPT+DNA R'+game.vptDnaAlign+'</span>';
                                     const isTriple = gV4Short && gVegasFav && gV4Short === predictedWinner && gVegasFav === predictedWinner;
-                                    const isV4V2 = gV4Short && gV4Short === predictedWinner;
+                                    const isV4V2 = !isTapeRow && gV4Short && gV4Short === predictedWinner;
                                     if (isTriple) return '<br><span style="font-size:9px;color:#f59e0b;font-weight:800;">🔐 TRIPLE LOCK</span>';
                                     if (isV4V2 && !isTriple) return '<br><span style="font-size:9px;color:#3b82f6;">✓V4+V2</span>';
+                                    if (isTapeRow && gV4Short) return '<br><span style="font-size:9px;color:#a78bfa;">V4-Tape</span>';
                                     return '';
                                 })()}
                             </td>
@@ -18467,7 +18630,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                 // Cipher Score + BD Score — tape rows show scores, non-tape show —
                                 if (!game.isTapeMatch) return '<td>—</td><td>—</td><td>—</td><td>—</td>';
                                 const tapeTotal = (game.tapeScoreA || 0) + (game.tapeScoreB || 0);
-                                const predWinTape = tapeTotal > 0 && (game.tapeScoreA||0) > (game.tapeScoreB||0) ? game.homeTeam : game.awayTeam;
+                                const predWinTape = (game.manualSave && game.v4Winner)
+                                    ? game.v4Winner
+                                    : (tapeTotal > 0 && (game.tapeScoreA||0) > (game.tapeScoreB||0) ? game.homeTeam : game.awayTeam);
                                 const wCipher = predWinTape === game.homeTeam ? (game.tapeCipherA||0) : (game.tapeCipherB||0);
                                 const lCipher = predWinTape === game.homeTeam ? (game.tapeCipherB||0) : (game.tapeCipherA||0);
                                 const wBd = predWinTape === game.homeTeam ? (game.tapeBdA||0) : (game.tapeBdB||0);
@@ -18770,12 +18935,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             html += `</div>`;
 
             html += `
+'                    </div>\n'
                     <div class="accuracy-actions">
                         <button onclick="exportFilteredResults()">📥 Export CSV ${activeFilterCount > 0 ? '(Filtered)' : '(All)'}</button>
                         <button onclick="exportFullBackup()" style="background:#0a1828;border-color:#3b82f6;color:#3b82f6;font-weight:800;" title="Export complete backup — includes ALL fields needed for every report">💾 Full Backup (.json)</button>
                         <button onclick="importFullBackup()" style="background:#0a1f12;border-color:#10b981;color:#10b981;font-weight:800;" title="Restore from a previous Full Backup .json file">📤 Restore Backup</button>
                         <button onclick="showDetailedReport()">📊 Detailed Report</button>
-                        <button class="danger" onclick="accuracyTracker.clearAllData()">🗑️ Clear All Data</button>
                     </div>
                     
                     <div class="storage-info">
@@ -18816,6 +18981,509 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
         // Manual result entry for Tape (Tennis/MMA) predictions
         // playerAWon=true means homeTeam (Player A) won; false means Player B won
 
+
+        // ── Root Number Lookup Tool ──────────────────────────────────────
+        function runRootLookup() {
+            var input = (document.getElementById('root-lookup-input').value || '').trim();
+            var el = document.getElementById('root-lookup-results');
+            if (!el) return;
+            if (!input) { el.innerHTML = '<div style="color:#4a5568;font-size:12px;padding:10px;">Enter 1-3 root numbers (e.g. 7 or 7,1,3)</div>'; return; }
+
+            // Parse roots from input (comma, space, or mixed)
+            var targetRoots = input.split(/[,\s]+/).map(function(s){return parseInt(s.trim());}).filter(function(n){return n>=1&&n<=9;});
+            if (targetRoots.length === 0) { el.innerHTML = '<div style="color:#f59e0b;font-size:12px;padding:10px;">Invalid input — enter numbers 1-9</div>'; return; }
+
+            el.innerHTML = '<div style="color:#8b92a7;font-size:12px;padding:10px;text-align:center;">🔍 Scanning all today\'s matchups...</div>';
+
+            // Collect all teams/players from today's games
+            var matches = []; // { nameA, nameB, sport, time }
+
+            // From pulseState.poolGames (all ESPN sports)
+            var pool = window.pulseState && window.pulseState.poolGames ? window.pulseState.poolGames : {};
+            Object.values(pool).forEach(function(pg) {
+                if (!pg.homeTeam || !pg.awayTeam) return;
+                matches.push({ nameA: pg.homeTeam, nameB: pg.awayTeam, sport: (pg.sport||'').toUpperCase(), time: pg.startTime ? new Date(pg.startTime).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '' });
+            });
+
+            // From gameWPs (current tab fallback)
+            if (matches.length === 0 && window.gameWPs) {
+                gameWPs.forEach(function(gd) {
+                    if (!gd.data || !gd.data.homeTeam) return;
+                    matches.push({ nameA: gd.data.homeTeam, nameB: gd.data.awayTeam, sport: (gd.sport||'').toUpperCase(), time: gd.data.startTime ? new Date(gd.data.startTime).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '' });
+                });
+            }
+
+            // From Tennis KNOWN_TOURNAMENTS today
+            if (window.KNOWN_TOURNAMENTS) {
+                var todayStr = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+                Object.values(window.KNOWN_TOURNAMENTS).forEach(function(t) {
+                    var byDate = t.byDate || {};
+                    (byDate[todayStr]||[]).forEach(function(m) {
+                        if (m.a && m.b) matches.push({ nameA: m.a, nameB: m.b, sport: 'TENNIS', time: m.timeStr||'' });
+                    });
+                });
+            }
+
+            // Score each team against target roots
+            function getTeamRootScore(name) {
+                try {
+                    var parts = name.trim().split(/\s+/);
+                    var vars = {
+                        full: name,
+                        city: parts.length>1 ? parts.slice(0,-1).join(' ') : name,
+                        mascot: parts[parts.length-1] || name,
+                        initials: parts.map(function(p){return p[0]||'';}).join('').toUpperCase()
+                    };
+                    var hits = 0, domRoot = null;
+                    var rootCounts = {};
+                    Object.values(vars).forEach(function(v) {
+                        var counts = {};
+                        Object.values(CIPHERS).forEach(function(fn) {
+                            var r = calculateDigitalRoot(fn(v)).root;
+                            if (r>=1&&r<=9) counts[r] = (counts[r]||0)+1;
+                        });
+                        var dom = Object.keys(counts).map(Number).sort(function(a,b){return counts[b]-counts[a];})[0];
+                        if (dom) { rootCounts[dom] = (rootCounts[dom]||0)+1; }
+                        if (dom && targetRoots.indexOf(dom) !== -1) hits++;
+                    });
+                    domRoot = Object.keys(rootCounts).map(Number).sort(function(a,b){return rootCounts[b]-rootCounts[a];})[0];
+                    return { hits: hits, domRoot: domRoot, total: 4 };
+                } catch(e) { return { hits: 0, domRoot: null, total: 4 }; }
+            }
+
+            // Score each matchup
+            var results = [];
+            matches.forEach(function(m) {
+                var sA = getTeamRootScore(m.nameA);
+                var sB = getTeamRootScore(m.nameB);
+                if (sA.hits === 0 && sB.hits === 0) return; // neither team matches
+                results.push({ m: m, sA: sA, sB: sB, maxHits: Math.max(sA.hits, sB.hits) });
+            });
+
+            // Sort: highest hits first, then alphabetical by sport
+            results.sort(function(a,b){ return b.maxHits-a.maxHits || a.m.sport.localeCompare(b.m.sport); });
+
+            if (results.length === 0) {
+                el.innerHTML = '<div style="color:#4a5568;background:#0f1419;border-radius:6px;padding:14px;font-size:12px;text-align:center;">No teams found with root' + (targetRoots.length>1?'s':'')+' R'+targetRoots.join('/R')+' today. Try a different root or check that games are loaded.</div>';
+                return;
+            }
+
+            var rootLabel = 'R' + targetRoots.join(' + R');
+            var html = '<div style="font-size:11px;color:#a78bfa;font-weight:700;margin-bottom:10px;">' + results.length + ' matchup' + (results.length!==1?'s':'') + ' with teams hitting ' + rootLabel + '</div>';
+
+            // Group by sport
+            var bySport = {};
+            results.forEach(function(r) { var sp=r.m.sport||'OTHER'; if(!bySport[sp]) bySport[sp]=[]; bySport[sp].push(r); });
+
+            Object.keys(bySport).sort().forEach(function(sp) {
+                html += '<div style="margin-bottom:14px;">';
+                html += '<div style="font-size:10px;font-weight:800;color:#4a5568;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">'+sp+'</div>';
+                bySport[sp].forEach(function(r) {
+                    var aHit = r.sA.hits > 0;
+                    var bHit = r.sB.hits > 0;
+                    var aCol = aHit ? (r.sA.hits>=3?'#a78bfa':r.sA.hits>=2?'#10b981':'#3b82f6') : '#4a5568';
+                    var bCol = bHit ? (r.sB.hits>=3?'#a78bfa':r.sB.hits>=2?'#10b981':'#3b82f6') : '#4a5568';
+                    var aBg  = aHit ? (r.sA.hits>=3?'#a78bfa22':r.sA.hits>=2?'#10b98122':'#3b82f622') : '#1a2535';
+                    var bBg  = bHit ? (r.sB.hits>=3?'#a78bfa22':r.sB.hits>=2?'#10b98122':'#3b82f622') : '#1a2535';
+                    var aBorder = aHit ? aCol.replace('22','55') : '#2a3142';
+                    var bBorder = bHit ? bCol.replace('22','55') : '#2a3142';
+                    html += '<div style="display:flex;align-items:center;gap:8px;background:#0f1419;border:1px solid #2a3142;border-radius:6px;padding:8px 12px;margin-bottom:5px;">';
+                    // Team A
+                    html += '<div style="flex:1;background:'+aBg+';border:1px solid '+aBorder+';border-radius:5px;padding:5px 9px;cursor:help;" title="'+r.m.nameA+': '+r.sA.hits+'/4 variations hit '+rootLabel+'. Dominant root: R'+r.sA.domRoot+'">';
+                    html += '<div style="font-size:12px;font-weight:700;color:'+aCol+';">'+r.m.nameA+'</div>';
+                    html += '<div style="font-size:10px;color:'+aCol+';">'+r.sA.hits+'/4 vars · R'+r.sA.domRoot+'</div>';
+                    html += '</div>';
+                    // VS
+                    html += '<div style="font-size:10px;color:#4a5568;font-weight:700;flex-shrink:0;">'+( r.m.time?'<div style=\"font-size:9px;color:#2a3142;text-align:center;\">'+r.m.time+'</div>':'' )+'VS</div>';
+                    // Team B
+                    html += '<div style="flex:1;background:'+bBg+';border:1px solid '+bBorder+';border-radius:5px;padding:5px 9px;cursor:help;" title="'+r.m.nameB+': '+r.sB.hits+'/4 variations hit '+rootLabel+'. Dominant root: R'+r.sB.domRoot+'">';
+                    html += '<div style="font-size:12px;font-weight:700;color:'+bCol+';">'+r.m.nameB+'</div>';
+                    html += '<div style="font-size:10px;color:'+bCol+';">'+r.sB.hits+'/4 vars · R'+r.sB.domRoot+'</div>';
+                    html += '</div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            });
+
+            // Color legend
+            html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid #1a2535;">';
+            html += '<span style="font-size:10px;color:#a78bfa;">● 3-4/4 vars (STRONG)</span>';
+            html += '<span style="font-size:10px;color:#10b981;">● 2/4 vars (GOOD)</span>';
+            html += '<span style="font-size:10px;color:#3b82f6;">● 1/4 vars (EDGE)</span>';
+            html += '<span style="font-size:10px;color:#4a5568;">● 0/4 (no match)</span>';
+            html += '</div>';
+
+            el.innerHTML = html;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // V4 vs V2 DECISION FRAMEWORK — Dynamic, data-driven guidelines
+        // ═══════════════════════════════════════════════════════════════
+        function renderV4V2Framework() {
+            var el = document.getElementById('content');
+            if (!el) return;
+
+            // ── Config ──
+            // Toggle MLB inclusion here when regular season starts (3/25)
+            var INCLUDE_MLB = false;
+            var VEGAS_SPORTS  = ['nba','nfl','cbb','cfb','nhl'].concat(INCLUDE_MLB ? ['mlb'] : []);
+            var TAPE_SPORTS   = ['tennis','mma','lacrosse','cricket','boxing','esports','rugby'];
+            var ALL_SPORTS    = VEGAS_SPORTS.concat(['soccer']).concat(TAPE_SPORTS);
+            var MIN_GAMES     = 5; // minimum games for a sport tier to show stats
+
+            var all = Array.from(accuracyTracker.results.values())
+                .filter(function(g){ return g.status==='COMPLETED' && g.homeWon!==null; });
+
+            // ── Helper: compute stats for a game set ──
+            function stats(games) {
+                if (!games.length) return null;
+                var v4wins=0, v2wins=0, bothRight=0, bothWrong=0, v4onlyRight=0, v2onlyRight=0;
+                var vegasWith=[], vegasAgainst=[], vegasNone=[];
+                var convTiers = { high:{w:0,l:0}, med:{w:0,l:0}, low:{w:0,l:0} };
+                var disagree  = { total:0, v4wins:0, v2wins:0 };
+                var agree     = { total:0, wins:0 };
+                var v4vegAgree= { total:0, wins:0 };
+                var v2vegAgree= { total:0, wins:0 };
+                var tripleAgree={ total:0, wins:0 };
+
+                games.forEach(function(g) {
+                    var actual   = g.homeWon;
+                    var v4pick   = g.predictedHomeWP >= 50; // V4 says home wins
+                    var v2pick   = (g.modelVersion && g.modelVersion.includes('V2'))
+                                   ? (g.predictedHomeWP > 50)
+                                   : (g.predictedHomeWP > 50); // both use same field
+                    // For V4 tape matches: predictedHomeWP encodes the tape winner
+                    var v4correct = v4pick === actual;
+                    var v2correct = v2pick === actual;
+                    if (v4correct) v4wins++;
+                    if (v2correct) v2wins++;
+                    if (v4correct && v2correct) bothRight++;
+                    if (!v4correct && !v2correct) bothWrong++;
+                    if (v4correct && !v2correct) v4onlyRight++;
+                    if (!v4correct && v2correct) v2onlyRight++;
+
+                    // Agreement analysis
+                    var v4v2same = (v4pick === v2pick);
+                    if (v4v2same) { agree.total++; if(v4correct) agree.wins++; }
+                    else          { disagree.total++; if(v4correct) disagree.v4wins++; else disagree.v2wins++; }
+
+                    // Vegas alignment
+                    var vSpread = g.vegasSpread;
+                    if (vSpread !== null && vSpread !== undefined && !isNaN(vSpread) && vSpread !== 0) {
+                        var vegasPick = vSpread < 0; // negative = home favored
+                        var v4vegSame = (v4pick === vegasPick);
+                        var v2vegSame = (v2pick === vegasPick);
+                        var triSame   = v4v2same && v4vegSame;
+                        if (v4vegSame) { v4vegAgree.total++; if(v4correct) v4vegAgree.wins++; }
+                        if (v2vegSame) { v2vegAgree.total++; if(v2correct) v2vegAgree.wins++; }
+                        if (triSame)   { tripleAgree.total++; if(v4correct) tripleAgree.wins++; }
+                        if (v4correct) vegasWith.push(g); else vegasAgainst.push(g);
+                    } else {
+                        vegasNone.push(g);
+                    }
+
+                    // V4 conviction tiers (from tapeConfFinal or v4ConvictionPct)
+                    var conv = g.tapeConfFinal || g.v4ConvictionPct || 0;
+                    var tier = conv >= 85 ? 'high' : conv >= 70 ? 'med' : 'low';
+                    if (v4correct) convTiers[tier].w++; else convTiers[tier].l++;
+                });
+
+                function pct(n, d) { return d > 0 ? (n/d*100).toFixed(1)+'%' : 'N/A'; }
+                return {
+                    n: games.length,
+                    v4wr: pct(v4wins, games.length), v4w: v4wins,
+                    v2wr: pct(v2wins, games.length), v2w: v2wins,
+                    bothRight: bothRight, bothWrong: bothWrong,
+                    v4only: v4onlyRight, v2only: v2onlyRight,
+                    agree: { n: agree.total, wr: pct(agree.wins, agree.total), w: agree.wins },
+                    disagree: { n: disagree.total, v4wr: pct(disagree.v4wins, disagree.total), v2wr: pct(disagree.v2wins, disagree.total), v4w: disagree.v4wins, v2w: disagree.v2wins },
+                    v4vegas: { n: v4vegAgree.total, wr: pct(v4vegAgree.wins, v4vegAgree.total) },
+                    v2vegas: { n: v2vegAgree.total, wr: pct(v2vegAgree.wins, v2vegAgree.total) },
+                    triple:  { n: tripleAgree.total, wr: pct(tripleAgree.wins, tripleAgree.total) },
+                    conv: convTiers
+                };
+            }
+
+            // ── Compute per-sport and aggregate stats ──
+            var bySport = {};
+            ALL_SPORTS.forEach(function(s) {
+                var sg = all.filter(function(g){ return (g.sport||'').toLowerCase() === s; });
+                bySport[s] = { games: sg, st: sg.length >= MIN_GAMES ? stats(sg) : null, n: sg.length };
+            });
+            var vegasGames = all.filter(function(g){ return VEGAS_SPORTS.indexOf((g.sport||'').toLowerCase()) !== -1; });
+            var tapeGames  = all.filter(function(g){ return TAPE_SPORTS.indexOf((g.sport||'').toLowerCase()) !== -1; });
+            var stVegas = vegasGames.length >= MIN_GAMES ? stats(vegasGames) : null;
+            var stTape  = tapeGames.length  >= MIN_GAMES ? stats(tapeGames)  : null;
+            var stAll   = all.length >= MIN_GAMES ? stats(all) : null;
+
+            // ── Generate pick recommendation per sport ──
+            function recommend(s, st) {
+                if (!st) return { label: 'Insufficient data', color: '#4a5568', detail: 'Need '+MIN_GAMES+'+ games' };
+                var v4n = parseFloat(st.v4wr), v2n = parseFloat(st.v2wr);
+                var diff = v4n - v2n;
+                var agreeN = parseFloat(st.agree.wr);
+                var disV4  = parseFloat(st.disagree.v4wr);
+                var triN   = parseFloat(st.triple.wr);
+                var lines  = [];
+
+                if (st.triple.n >= MIN_GAMES) {
+                    if (triN >= 65) lines.push({ txt: 'V4+V2+Vegas LOCK: '+st.triple.wr+' ('+st.triple.n+' games)', col: '#a78bfa', weight: 3 });
+                    else if (triN >= 55) lines.push({ txt: 'V4+V2+Vegas agree: '+st.triple.wr, col: '#3b82f6', weight: 2 });
+                }
+                if (st.agree.n >= MIN_GAMES) {
+                    if (agreeN >= 65) lines.push({ txt: 'V4+V2 consensus: '+st.agree.wr+' ('+st.agree.n+' games)', col: '#10b981', weight: 2 });
+                }
+                if (st.disagree.n >= MIN_GAMES) {
+                    if (disV4 >= 60) lines.push({ txt: 'V4 splits: back V4 ('+st.disagree.v4wr+')', col: '#f59e0b', weight: 1 });
+                    else if (parseFloat(st.disagree.v2wr) >= 60) lines.push({ txt: 'V4 splits: back V2 ('+st.disagree.v2wr+')', col: '#f59e0b', weight: 1 });
+                    else lines.push({ txt: 'Splits: no clear edge (V4 '+st.disagree.v4wr+' / V2 '+st.disagree.v2wr+')', col: '#4a5568', weight: 0 });
+                }
+                // Conviction tier insight
+                var hC=st.conv.high, mC=st.conv.med, lC=st.conv.low;
+                var hN=hC.w+hC.l, mN=mC.w+mC.l, lN=lC.w+lC.l;
+                if (hN >= MIN_GAMES) {
+                    var hPct = (hC.w/hN*100).toFixed(1);
+                    if (parseFloat(hPct) >= 65) lines.push({ txt: 'V4 HIGH conviction (≥85%): '+hPct+'% ('+hN+' games)', col: '#8b5cf6', weight: 2 });
+                    else if (parseFloat(hPct) <= 45) lines.push({ txt: 'V4 HIGH conviction unreliable: '+hPct+'%', col: '#ef4444', weight: -1 });
+                }
+
+                if (!lines.length) lines.push({ txt: 'More data needed for firm guidelines', col: '#4a5568', weight: 0 });
+                lines.sort(function(a,b){return b.weight-a.weight;});
+
+                var topCol = lines[0].col;
+                var bothStrong = v4n >= 60 && v2n >= 60;
+                var bothWeak   = v4n < 50 && v2n < 50;
+                var trueCoinFlip = Math.abs(v4n - 50) < 5 && Math.abs(v2n - 50) < 5;
+                var overallLabel, overallCol;
+                if (diff >= 8)        { overallLabel = 'PREFER V4';    overallCol = '#a78bfa'; }
+                else if (diff <= -8)  { overallLabel = 'PREFER V2';    overallCol = '#10b981'; }
+                else if (bothStrong)  { overallLabel = 'BOTH STRONG';  overallCol = '#10b981'; }
+                else if (bothWeak)    { overallLabel = 'WEAK SIGNALS'; overallCol = '#ef4444'; }
+                else if (trueCoinFlip){ overallLabel = 'COIN FLIP';    overallCol = '#f59e0b'; }
+                else if (diff >= 3)   { overallLabel = 'V4 SLIGHT EDGE'; overallCol = '#a78bfa'; }
+                else if (diff <= -3)  { overallLabel = 'V2 SLIGHT EDGE'; overallCol = '#10b981'; }
+                else                  { overallLabel = 'NEAR EQUAL';   overallCol = '#3b82f6'; }
+                var overallCol   = diff >= 5 ? '#a78bfa'  : diff <= -5 ? '#10b981'  : '#f59e0b';
+                return { label: overallLabel, color: overallCol, lines: lines };
+            }
+
+
+                // ── Generate explicit decision for a sport ──
+                function decision(sportKey, st) {
+                    if (!st || st.n < MIN_GAMES) return null;
+                    var v4n = parseFloat(st.v4wr), v2n = parseFloat(st.v2wr);
+                    var agreeN = parseFloat(st.agree.wr);
+                    var disV4  = parseFloat(st.disagree.v4wr);
+                    var disV2  = parseFloat(st.disagree.v2wr);
+                    var triN   = parseFloat(st.triple.wr);
+                    var hC=st.conv.high, hN=hC.w+hC.l;
+                    var hPct = hN >= MIN_GAMES ? hC.w/hN*100 : null;
+                    var rules = [];
+
+                    // Rule 1: Triple lock
+                    if (st.triple.n >= MIN_GAMES && triN >= 60) {
+                        rules.push({ priority: 1, condition: 'V4 + V2 + Vegas all agree', action: 'BET · '+st.triple.wr+' hit rate', confidence: triN, games: st.triple.n, col: '#8b5cf6' });
+                    }
+                    // Rule 2: Consensus (V4=V2, no Vegas required)
+                    if (st.agree.n >= MIN_GAMES && agreeN >= 60) {
+                        rules.push({ priority: 2, condition: 'V4 and V2 agree (any conviction)', action: 'LEAN · '+st.agree.wr+' hit rate', confidence: agreeN, games: st.agree.n, col: '#3b82f6' });
+                    }
+                    // Rule 3: High conviction V4 override
+                    if (hN >= MIN_GAMES && hPct !== null && hPct >= 62) {
+                        rules.push({ priority: 3, condition: 'V4 conviction ≥85% (HIGH tier)', action: 'TRUST V4 · '+hPct.toFixed(1)+'% hit rate', confidence: hPct, games: hN, col: '#a78bfa' });
+                    }
+                    // Rule 4: When they split — who wins?
+                    if (st.disagree.n >= MIN_GAMES) {
+                        if (disV4 >= 58) {
+                            rules.push({ priority: 4, condition: 'V4 and V2 disagree', action: 'TAKE V4 · wins '+st.disagree.v4wr+' of splits', confidence: disV4, games: st.disagree.n, col: '#f59e0b' });
+                        } else if (disV2 >= 58) {
+                            rules.push({ priority: 4, condition: 'V4 and V2 disagree', action: 'TAKE V2 · wins '+st.disagree.v2wr+' of splits', confidence: disV2, games: st.disagree.n, col: '#10b981' });
+                        } else {
+                            rules.push({ priority: 4, condition: 'V4 and V2 disagree', action: 'SKIP · no reliable edge in splits (V4 '+st.disagree.v4wr+' / V2 '+st.disagree.v2wr+')', confidence: 50, games: st.disagree.n, col: '#4a5568' });
+                        }
+                    }
+                    // Rule 5: High conviction warning
+                    if (hN >= MIN_GAMES && hPct !== null && hPct <= 45) {
+                        rules.push({ priority: 5, condition: 'V4 conviction ≥85%', action: 'FADE V4 · only '+hPct.toFixed(1)+'% — HIGH conviction misleading here', confidence: 100-hPct, games: hN, col: '#ef4444' });
+                    }
+                    // Compute a composite decision score (0-100) for % change tracking
+                    var score = 0, scoreW = 0;
+                    if (st.triple.n >= MIN_GAMES) { score += triN * 0.4; scoreW += 0.4; }
+                    if (st.agree.n  >= MIN_GAMES) { score += agreeN * 0.35; scoreW += 0.35; }
+                    score += v4n * 0.15 + v2n * 0.10; scoreW += 0.25;
+                    var compositeScore = scoreW > 0 ? score / scoreW : (v4n + v2n) / 2;
+                    return { rules: rules, compositeScore: compositeScore.toFixed(1) };
+                }
+
+            // ── Render helper ──
+            function pBar(pctStr, col) {
+                var n = parseFloat(pctStr) || 0;
+                return '<div style="display:flex;align-items:center;gap:6px;">'
+                    + '<div style="flex:1;background:#1a2535;border-radius:3px;height:6px;">'
+                    + '<div style="width:'+Math.min(100,n)+'%;background:'+col+';height:6px;border-radius:3px;"></div></div>'
+                    + '<span style="font-size:11px;font-weight:700;color:'+col+';min-width:38px;">'+pctStr+'</span></div>';
+            }
+
+            function sportCard(sportKey, label) {
+                var d = bySport[sportKey];
+                var st = d.st;
+                var rec = recommend(sportKey, st);
+                var bg = st ? '#0f1419' : '#0a0e15';
+                var border = st ? '#2a3142' : '#1a2030';
+                var h = '<div style="background:'+bg+';border:1px solid '+border+';border-radius:8px;padding:14px;margin-bottom:10px;">';
+                h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+                h += '<div style="font-size:13px;font-weight:800;color:#fff;">'+label+'</div>';
+                h += '<div style="display:flex;gap:8px;align-items:center;">';
+                h += '<span style="font-size:10px;color:#4a5568;">'+d.n+' games</span>';
+                h += '<span style="font-size:10px;font-weight:700;color:'+rec.color+';background:'+rec.color+'18;border:1px solid '+rec.color+'44;border-radius:10px;padding:2px 8px;">'+rec.label+'</span>';
+                h += '</div></div>';
+                if (!st) {
+                    h += '<div style="font-size:11px;color:#4a5568;">Need '+MIN_GAMES+'+ games for analysis. '+d.n+' tracked so far.</div>';
+                } else {
+                    // Win rates
+                    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">';
+                    h += '<div><div style="font-size:10px;color:#a78bfa;font-weight:700;margin-bottom:3px;">V4 Win Rate</div>'+pBar(st.v4wr,'#a78bfa')+'</div>';
+                    h += '<div><div style="font-size:10px;color:#10b981;font-weight:700;margin-bottom:3px;">V2 Win Rate</div>'+pBar(st.v2wr,'#10b981')+'</div>';
+                    if (st.agree.n > 0) {
+                        h += '<div><div style="font-size:10px;color:#3b82f6;font-weight:700;margin-bottom:3px;">Consensus ('+st.agree.n+')</div>'+pBar(st.agree.wr,'#3b82f6')+'</div>';
+                    }
+                    if (st.triple.n > 0) {
+                        h += '<div><div style="font-size:10px;color:#8b5cf6;font-weight:700;margin-bottom:3px;">V4+V2+Vegas ('+st.triple.n+')</div>'+pBar(st.triple.wr,'#8b5cf6')+'</div>';
+                    }
+                    h += '</div>';
+                    // Disagreement row
+                    if (st.disagree.n > 0) {
+                        h += '<div style="background:#0a0e15;border-radius:5px;padding:7px 10px;margin-bottom:8px;font-size:11px;">';
+                        h += '<span style="color:#4a5568;font-weight:700;">When V4≠V2 ('+st.disagree.n+' games): </span>';
+                        h += '<span style="color:#a78bfa;">V4: '+st.disagree.v4wr+'</span> <span style="color:#4a5568;">·</span> ';
+                        h += '<span style="color:#10b981;">V2: '+st.disagree.v2wr+'</span>';
+                        h += '</div>';
+                    }
+                    // Conviction breakdown
+                    var hC=st.conv.high, mC=st.conv.med, lC=st.conv.low;
+                    var hN=hC.w+hC.l, mN=mC.w+mC.l, lN=lC.w+lC.l;
+                    if (hN+mN+lN > 0) {
+                        h += '<div style="font-size:10px;color:#4a5568;font-weight:700;margin-bottom:4px;">V4 CONVICTION TIERS</div>';
+                        h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
+                        if (hN > 0) h += '<span style="font-size:10px;background:#8b5cf622;border:1px solid #8b5cf644;border-radius:4px;padding:2px 7px;color:#8b5cf6;" title="HIGH conviction (≥85%): '+hN+' games">HIGH '+(hC.w/hN*100).toFixed(0)+'% ('+hN+')</span>';
+                        if (mN > 0) h += '<span style="font-size:10px;background:#3b82f622;border:1px solid #3b82f644;border-radius:4px;padding:2px 7px;color:#3b82f6;" title="MED conviction (70-84%): '+mN+' games">MED '+(mC.w/mN*100).toFixed(0)+'% ('+mN+')</span>';
+                        if (lN > 0) h += '<span style="font-size:10px;background:#4a556822;border:1px solid #4a5568;border-radius:4px;padding:2px 7px;color:#4a5568;" title="LOW conviction (<70%): '+lN+' games">LOW '+(lC.w/lN*100).toFixed(0)+'% ('+lN+')</span>';
+                        h += '</div>';
+                    }
+                    // Guidelines
+                    h += '<div style="font-size:10px;color:#4a5568;font-weight:700;margin-bottom:4px;">PICK GUIDELINES</div>';
+                    rec.lines.forEach(function(line) {
+                        h += '<div style="font-size:11px;color:'+line.col+';background:'+line.col+'11;border-left:2px solid '+line.col+';padding:3px 8px;margin-bottom:3px;border-radius:0 4px 4px 0;">'+line.txt+'</div>';
+                    });
+                }
+                h += '</div>';
+
+                    // ── Decision block ──
+                    var dec = decision(sportKey, st);
+                    if (dec && dec.rules.length) {
+                        h += '<div style="margin-top:10px;border-top:1px solid #1a2535;padding-top:10px;">';
+                        h += '<div style="font-size:10px;color:#fff;font-weight:800;margin-bottom:6px;">🎯 DECISIONS — What to do</div>';
+                        dec.rules.forEach(function(rule, idx) {
+                            var actionCol = rule.confidence >= 65 ? rule.col : rule.confidence >= 55 ? rule.col : '#4a5568';
+                            h += '<div style="display:flex;align-items:flex-start;gap:8px;background:'+rule.col+'0d;border:1px solid '+rule.col+'33;border-radius:5px;padding:6px 10px;margin-bottom:5px;">';
+                            h += '<span style="font-size:10px;font-weight:800;color:'+rule.col+';background:'+rule.col+'22;border-radius:3px;padding:1px 6px;flex-shrink:0;min-width:20px;text-align:center;">'+(idx+1)+'</span>';
+                            h += '<div style="flex:1;">';
+                            h += '<div style="font-size:10px;color:#8b92a7;">IF: '+rule.condition+'</div>';
+                            h += '<div style="font-size:12px;font-weight:800;color:'+rule.col+';margin-top:2px;">→ '+rule.action+'</div>';
+                            h += '<div style="font-size:9px;color:#4a5568;margin-top:1px;">Based on '+rule.games+' games</div>';
+                            h += '</div></div>';
+                        });
+                        // % change tracking
+                        var storageKey = 'v4v2_score_'+sportKey;
+                        var prevScore = null;
+                        try { var ps = localStorage.getItem(storageKey); if(ps) prevScore = JSON.parse(ps); } catch(e){}
+                        var todayScore = parseFloat(dec.compositeScore);
+                        var changeHtml = '';
+                        if (prevScore && prevScore.date !== new Date().toDateString()) {
+                            var delta = (todayScore - prevScore.score).toFixed(1);
+                            var deltaCol = parseFloat(delta) > 0 ? '#10b981' : parseFloat(delta) < 0 ? '#ef4444' : '#4a5568';
+                            var deltaIcon = parseFloat(delta) > 0 ? '▲' : parseFloat(delta) < 0 ? '▼' : '—';
+                            changeHtml = ' <span style="font-size:10px;color:'+deltaCol+';">'+deltaIcon+' '+Math.abs(parseFloat(delta)).toFixed(1)+'% vs yesterday</span>';
+                        }
+                        // Save today's score
+                        try { localStorage.setItem(storageKey, JSON.stringify({score: todayScore, date: new Date().toDateString()})); } catch(e){}
+                        h += '<div style="font-size:11px;color:#4a5568;margin-top:6px;">Framework score: <span style="color:#fff;font-weight:700;">'+dec.compositeScore+'</span>'+changeHtml+'</div>';
+                        h += '</div>';
+                    }
+                return h;
+            }
+
+            // ── Build the full page ──
+            var sportNameMap = {nba:'NBA',nfl:'NFL',cbb:'College Basketball',cfb:'College Football',nhl:'NHL',mlb:'MLB',soccer:'Soccer',tennis:'🎾 Tennis',mma:'🥊 MMA',lacrosse:'🥍 Lacrosse',cricket:'🏏 Cricket',boxing:'🥊 Boxing',esports:'🎮 E-Sports',rugby:'🏉 Rugby'};
+
+            var h = '<div style="max-width:1100px;margin:0 auto;padding:20px;">';
+            h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">';
+            h += '<button onclick="renderAccuracyDashboard()" style="background:#1a2535;border:1px solid #2a3142;color:#8b92a7;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;">← Back</button>';
+            h += '<h2 style="margin:0;color:#3b82f6;font-size:16px;font-weight:800;">⚔️ V4 vs V2 Decision Framework</h2>';
+            h += '<span style="font-size:11px;color:#4a5568;">'+all.length+' total results · updates automatically · MLB excluded (pre-season)</span>';
+            h += '</div>';
+
+            // ── Aggregate summary ──
+            if (stAll) {
+                h += '<div style="background:#0f1419;border:1px solid #3b82f644;border-radius:10px;padding:16px;margin-bottom:20px;">';
+                h += '<div style="font-size:13px;font-weight:800;color:#3b82f6;margin-bottom:12px;">📊 OVERALL SUMMARY — All Sports</div>';
+                h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:12px;">';
+                var summaryStats = [
+                    {label:'V4 Overall', val:stAll.v4wr, col:'#a78bfa', n:stAll.n},
+                    {label:'V2 Overall', val:stAll.v2wr, col:'#10b981', n:stAll.n},
+                    {label:'Consensus (V4=V2)', val:stAll.agree.wr, col:'#3b82f6', n:stAll.agree.n},
+                    {label:'V4+V2+Vegas Lock', val:stAll.triple.wr, col:'#8b5cf6', n:stAll.triple.n},
+                ];
+                summaryStats.forEach(function(s) {
+                    h += '<div style="background:#1a2535;border-radius:6px;padding:10px;">';
+                    h += '<div style="font-size:10px;color:'+s.col+';font-weight:700;margin-bottom:4px;">'+s.label+' ('+s.n+')</div>';
+                    h += pBar(s.val, s.col);
+                    h += '</div>';
+                });
+                h += '</div>';
+                h += '<div style="font-size:11px;color:#4a5568;background:#1a2535;border-radius:5px;padding:8px 12px;">';
+                h += '🔀 When V4≠V2 ('+stAll.disagree.n+' games): V4 wins '+stAll.disagree.v4wr+' · V2 wins '+stAll.disagree.v2wr;
+                h += ' &nbsp;·&nbsp; Both right: '+stAll.bothRight+' · Both wrong: '+stAll.bothWrong;
+                h += ' &nbsp;·&nbsp; V4 only right: '+stAll.v4only+' · V2 only right: '+stAll.v2only;
+                h += '</div></div>';
+            }
+
+            // ── Vegas-eligible sports ──
+            h += '<div style="font-size:12px;font-weight:800;color:#fff;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2a3142;">🎰 VEGAS-ELIGIBLE SPORTS (V4 · V2 · Vegas)</div>';
+            if (stVegas) {
+                h += '<div style="background:#0f1a2e;border:1px solid #3b82f633;border-radius:8px;padding:12px;margin-bottom:12px;">';
+                h += '<div style="font-size:11px;font-weight:700;color:#3b82f6;margin-bottom:8px;">Combined: '+vegasGames.length+' games</div>';
+                h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:6px;">';
+                [['V4',stVegas.v4wr,'#a78bfa'],['V2',stVegas.v2wr,'#10b981'],['Consensus',stVegas.agree.wr,'#3b82f6'],['Triple Lock',stVegas.triple.wr,'#8b5cf6']].forEach(function(row){
+                    h += '<div style="background:#1a2535;border-radius:5px;padding:8px;"><div style="font-size:10px;color:'+row[2]+';margin-bottom:3px;">'+row[0]+'</div>'+pBar(row[1],row[2])+'</div>';
+                });
+                h += '</div></div>';
+            }
+            VEGAS_SPORTS.forEach(function(s) { h += sportCard(s, sportNameMap[s]||s.toUpperCase()); });
+
+            // ── Soccer ──
+            h += '<div style="font-size:12px;font-weight:800;color:#fff;margin:16px 0 8px;padding-bottom:6px;border-bottom:1px solid #2a3142;">⚽ SOCCER (partial Vegas coverage)</div>';
+            h += sportCard('soccer', 'Soccer');
+
+            // ── Tape sports ──
+            h += '<div style="font-size:12px;font-weight:800;color:#fff;margin:16px 0 8px;padding-bottom:6px;border-bottom:1px solid #2a3142;">🎾 TAPE SPORTS (V4 only — no V2/Vegas model)</div>';
+            if (stTape) {
+                h += '<div style="background:#1a1000;border:1px solid #f59e0b22;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#f59e0b;">';
+                h += '⚠️ Tape sports use V4 cipher scoring only. V2 statistical model and Vegas lines do not apply. Win rates reflect V4 tape prediction accuracy only.';
+                h += ' Combined: '+tapeGames.length+' games tracked · V4 overall: '+stTape.v4wr;
+                h += '</div>';
+            }
+            TAPE_SPORTS.forEach(function(s) { h += sportCard(s, sportNameMap[s]||s.toUpperCase()); });
+
+            // ── MLB note ──
+            h += '<div style="background:#1a0808;border:1px solid #ef444422;border-radius:6px;padding:10px 14px;margin-top:16px;font-size:11px;color:#ef4444;">';
+            h += '⚾ <strong>MLB excluded</strong> — Spring Training results not counted. Toggle <code>INCLUDE_MLB = true</code> in the framework function when regular season begins (3/25).';
+            h += '</div>';
+
+            h += '</div>';
+            el.innerHTML = h;
+        }
+
         // ── Pending results search — in-place DOM filter, no re-render ──
         function filterPendingCards(query) {
             window._pendingSearchQuery = query;
@@ -18848,6 +19516,27 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             var _pgl = document.querySelector('.pending-games-list');
             window._pendingScrollY = _pgl ? _pgl.scrollTop : 0;
             accuracyTracker.predictions.delete(gameId);
+            accuracyTracker.saveToStorage();
+            renderAccuracyDashboard();
+        }
+
+
+        function updateResultsBulkBtn() {
+            var checked = document.querySelectorAll('.result-row-cb:checked').length;
+            var btn = document.getElementById('results-bulk-delete-btn');
+            var cnt = document.getElementById('results-selected-count');
+            if (btn) { btn.style.display = checked > 0 ? 'inline-block' : 'none'; btn.textContent = '\uD83D\uDDD1 Delete Selected (' + checked + ')'; }
+            if (cnt) cnt.textContent = checked > 0 ? checked + ' selected' : '';
+        }
+
+        function bulkDeleteResults() {
+            var checked = document.querySelectorAll('.result-row-cb:checked');
+            if (checked.length === 0) return;
+            if (!confirm('Delete ' + checked.length + ' result(s)? This will adjust W-L records.')) return;
+            checked.forEach(function(cb) {
+                var gid = cb.getAttribute('data-gameid');
+                if (gid) accuracyTracker.results.delete(gid);
+            });
             accuracyTracker.saveToStorage();
             renderAccuracyDashboard();
         }
@@ -20627,6 +21316,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             }
 
             const predictions = [];
+            // Compute VPT roots once per render (today's cipher-frequency targets)
+            const _vptRoots = (typeof computeVPTRoots === 'function') ? computeVPTRoots() : null;
+            const _dnaRoots = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : null;
             gameWPs.forEach((gameData, gameId) => {
                 if (!gameData.data) return;
                 // Only include games from the currently active sport tab
@@ -20720,6 +21412,25 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     const tapeLosing = tapeWinner === homeTeam ? awayTeam : homeTeam;
                     const winnerTS   = tapeWinner === homeTeam ? homeTS : awayTS;
                     const loserTS    = tapeWinner === homeTeam ? awayTS : homeTS;
+                    // ── DNA Variation Scores for sidebar badges ──
+                    function _sidebarVarScore(name) {
+                        try {
+                            var _obs=(typeof getObservedDailyRoots==='function')?getObservedDailyRoots():{targets:[7,1,3],losers:[4,5]};
+                            var parts=name.trim().split(/\s+/);
+                            var vars={full:name,city:parts.length>1?parts.slice(0,-1).join(' '):name,mascot:parts[parts.length-1]||name,initials:parts.map(function(p){return p[0]||'';}).join('').toUpperCase()};
+                            var hits=0;
+                            Object.values(vars).forEach(function(v){
+                                var counts={};
+                                Object.values(CIPHERS).forEach(function(fn){var r=calculateDigitalRoot(fn(v)).root;if(r>=1&&r<=9)counts[r]=(counts[r]||0)+1;});
+                                var dom=Object.keys(counts).map(Number).sort(function(a,b){return counts[b]-counts[a];})[0];
+                                if(dom&&_obs.targets.indexOf(dom)!==-1)hits++;
+                            });
+                            return hits;
+                        } catch(e){return 0;}
+                    }
+                    const _dnaWinScore = _sidebarVarScore(tapeWinner);
+                    const _dnaLoseScore = _sidebarVarScore(tapeLosing);
+                    const _dnaDelta = _dnaWinScore - _dnaLoseScore;
                     const maxExpectedMargin = 120;
                     const tapeConfPct = Math.min(99, Math.round(50 + (margin/maxExpectedMargin)*49));
                     const tapeConf   = margin===0 ? 'EVEN' :
@@ -20906,6 +21617,19 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         skipPatternRoots: _skipResult ? _skipResult.predictedRoots : [],
                         skipPickRoots: _skipResult ? _skipResult.pickRoots : null,
                         skipOppRoots: _skipResult ? _skipResult.oppRoots : null,
+                        dnaWinVarScore: _dnaWinScore, dnaLoseVarScore: _dnaLoseScore, dnaDelta: _dnaDelta,
+                        vptDnaWinner: (function(){
+                            if (!_vptRoots || !_dnaRoots) return false;
+                            return (typeof checkVPTDNAAlignment === 'function')
+                                ? checkVPTDNAAlignment(tapeWinner, _vptRoots, _dnaRoots)
+                                : false;
+                        })(),
+                        vptDnaLoser: (function(){
+                            if (!_vptRoots || !_dnaRoots) return false;
+                            return (typeof checkVPTDNAAlignment === 'function')
+                                ? checkVPTDNAAlignment(tapeLosing, _vptRoots, _dnaRoots)
+                                : false;
+                        })(),
                         v4Total, v2Total, vegasTotal, ouAdjustPts,
                         combinedVSum,
                         drawProb, sport: gameSport,
@@ -21208,6 +21932,32 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         alignBadges + v4badge + v4OverrideBadge +
                     '</div>' +
                     trapBadgeHtml +
+                    (function(){
+                        // VPT+DNA Alignment badge
+                        try {
+                            var _vptA = checkVPTDNAAlign(p.tapeWinner);
+                            if (_vptA && _vptA.aligned) {
+                                var _vptTip = 'VPT+DNA ALIGNED: Both the VPT cipher frequency root (R'+_vptA.vptRoot+') and the DNA dominant root (R'+_vptA.dnaRoot+') of '+p.tapeWinner.split(' ').pop()+' are confirmed target roots today ('+_vptA.targets.map(function(r){return 'R'+r;}).join('/')+'). Dual-system convergence — strongest vibrational signal.';
+                                return '<div style="margin-top:4px;"><span class="chronos-tip" data-tip="'+_vptTip+'" style="font-size:10px;font-weight:800;color:#f59e0b;background:#f59e0b11;border:1px solid #f59e0b44;border-radius:4px;padding:2px 8px;cursor:help;">⚡🧬 VPT+DNA ALIGNED</span></div>';
+                            }
+                            if (_vptA && _vptA.bothLoser) {
+                                var _vptLTip = 'VPT+DNA LOSER SIGNAL: Both VPT root (R'+_vptA.vptRoot+') and DNA root (R'+_vptA.dnaRoot+') of '+p.tapeWinner.split(' ').pop()+' are loser roots today. Dual-system warning — treat with caution.';
+                                return '<div style="margin-top:4px;"><span class="chronos-tip" data-tip="'+_vptLTip+'" style="font-size:10px;font-weight:700;color:#ef4444;background:#ef444411;border:1px solid #ef444433;border-radius:4px;padding:2px 8px;cursor:help;">⚠️ VPT+DNA LOSER</span></div>';
+                            }
+                        } catch(e) {}
+                        return '';
+                    })() +
+                    (function(){
+                        var _dvHtml='';
+                        if(p.dnaWinVarScore>=3) _dvHtml+='<div style="margin-top:4px;"><span class="chronos-tip" data-tip="DNA VAR STRONG: '+p.dnaWinVarScore+'/4 name variations of the predicted winner hit target roots. Strongest DNA alignment." style="font-size:10px;font-weight:700;color:#10b981;background:#10b98111;border:1px solid #10b98133;border-radius:4px;padding:2px 7px;cursor:help;">🧬 DNA VAR STRONG ('+p.dnaWinVarScore+'/4)</span></div>';
+                        else if(p.dnaWinVarScore===2) _dvHtml+='<div style="margin-top:4px;"><span class="chronos-tip" data-tip="DNA VAR GOOD: 2/4 name variations hit target roots. Solid DNA alignment for the predicted winner." style="font-size:10px;font-weight:700;color:#3b82f6;background:#3b82f611;border:1px solid #3b82f633;border-radius:4px;padding:2px 7px;cursor:help;">🧬 DNA VAR GOOD (2/4)</span></div>';
+                        if(p.dnaDelta>=2) _dvHtml+='<div style="margin-top:4px;"><span class="chronos-tip" data-tip="DNA VAR EDGE: Winner has '+p.dnaDelta+' more variation hits than loser on target roots." style="font-size:10px;font-weight:700;color:#a78bfa;background:#a78bfa11;border:1px solid #a78bfa33;border-radius:4px;padding:2px 7px;cursor:help;">🧬 DNA EDGE +'+p.dnaDelta+'</span></div>';
+                        // VPT+DNA Alignment badge
+                        if(p.vptDnaWinner && !p.vptDnaLoser) {
+                            _dvHtml+='<div style="margin-top:4px;"><span class="chronos-tip" data-tip="VPT+DNA ALIGN: R'+p.vptDnaWinner+' is a target root in BOTH the Vibrational Pattern Tracker (cipher frequency) AND the DNA Root Matrix (dominant root). Dual-system convergence on the predicted winner — strongest cross-signal available." style="font-size:10px;font-weight:800;color:#fbbf24;background:#fbbf2411;border:1px solid #fbbf2433;border-radius:4px;padding:2px 7px;cursor:help;">⚡ VPT+DNA ALIGN R'+p.vptDnaWinner+'</span></div>';
+                        }
+                        return _dvHtml;
+                    })() +
                     (function() {
                         if (!p.skipPatternPick) return '';
                         const isWinnerPick = p.skipPatternPick === p.tapeWinner;
@@ -21242,6 +21992,10 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     '</div>';
             }).join('');
 
+            // Cache sidebar predictions globally — per sport so VPR can access all sports
+            window._sidebarPredictions = predictions;
+            if (!window._sidebarPredictionsBySport) window._sidebarPredictionsBySport = {};
+            window._sidebarPredictionsBySport[currentSport] = predictions;
             const sidebarTitle = (currentSport === 'nba' || currentSport === 'cbb' || currentSport === 'nfl' || currentSport === 'cfb' || currentSport === 'nhl' || currentSport === 'mlb' || currentSport === 'soccer')
                 ? '⚡ V4 Chronos Predictions'
                 : '⚡ Tape Predictions';
@@ -21583,7 +22337,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 homeTeam: home.team.displayName,
                 awayTeam: away.team.displayName,
                 homeTeamId: home.team.id,  // For intelligence API calls
-                awayTeamId: away.team.id,  // For intelligence API calls
+        awayTeamId: away.team.id,  // For intelligence API calls
+        homeRecord: (home.records && home.records[0] && home.records[0].summary) || null,
+        awayRecord: (away.records && away.records[0] && away.records[0].summary) || null,
                 homeScore: parseInt(home.score) || 0,
                 awayScore: parseInt(away.score) || 0,
                 vegasSpread: null,
@@ -22911,6 +23667,10 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 }
         function renderGameCard(data, wpResult, sportConfig, intelligence) {
             const wp = wpResult.wp;
+            // P badge: locked to PRE-GAME stored prediction — never flips during live game
+            const _storedPred = (typeof accuracyTracker !== 'undefined') ? accuracyTracker.predictions.get(data.id) : null;
+            const _pregameHomeWP = _storedPred ? (_storedPred.predictedHomeWP || 50) : (wp * 100);
+            const _homeIsPredWinner = _pregameHomeWP > 50;
             const confidenceInfo = getConfidenceLevel(wpResult);
             
             let situation = '';
@@ -23063,14 +23823,16 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                             <div class="team ${!data.isLive || data.possession !== 'away' ? '' : 'has-possession'}">
                                 <div class="team-name">
                                     ${!data.isLive || data.possession !== 'away' ? '' : `<span class="possession-indicator">${sportConfig.possessionIndicator}</span>`}
-                                    ${data.awayTeam}${wp !== undefined && wp <= 0.5 ? '<span style="font-size:9px;color:#10b981;font-weight:800;background:#0d2010;border-radius:2px;padding:0 3px;margin-left:3px;">P</span>' : ''}
+                                    ${data.awayTeam}${(sportConfig.sport==='mlb'||currentSport==='mlb')&&data.awayRecord?'<span style="font-size:9px;color:#4a5568;margin-left:4px;">('+data.awayRecord+')</span>':''}
+                                    ${!_homeIsPredWinner ? '<span style="font-size:9px;color:#10b981;font-weight:800;background:#0d2010;border-radius:2px;padding:0 3px;margin-left:3px;">P</span>' : ''}
                                 </div>
                                 <div class="team-score">${data.isLive ? data.awayScore : '-'}</div>
                             </div>
                             <div class="team ${!data.isLive || data.possession !== 'home' ? '' : 'has-possession'}">
                                 <div class="team-name">
                                     ${!data.isLive || data.possession !== 'home' ? '' : `<span class="possession-indicator">${sportConfig.possessionIndicator}</span>`}
-                                    ${data.homeTeam}${wp !== undefined && wp > 0.5 ? '<span style="font-size:9px;color:#10b981;font-weight:800;background:#0d2010;border-radius:2px;padding:0 3px;margin-left:3px;">P</span>' : ''}
+                                    ${data.homeTeam}${(sportConfig.sport==='mlb'||currentSport==='mlb')&&data.homeRecord?'<span style="font-size:9px;color:#4a5568;margin-left:4px;">('+data.homeRecord+')</span>':''}
+                                    ${_homeIsPredWinner ? '<span style="font-size:9px;color:#10b981;font-weight:800;background:#0d2010;border-radius:2px;padding:0 3px;margin-left:3px;">P</span>' : ''}
                                 </div>
                                 <div class="team-score">${data.isLive ? data.homeScore : '-'}</div>
                             </div>
@@ -23987,6 +24749,68 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
             });
             html += '</table></div>';
             return html;
+        }
+
+        // ── VPT+DNA Alignment Checker ──────────────────────────────────────────
+        // VPT root: most frequent raw cipher VALUE (not digital root) across
+        //           all 12 ciphers × 4 name variations (48 totals), then digital-root collapsed
+        // DNA root: most frequent digital root across same 48 values (getObservedDailyRoots method)
+        // ALIGNED:  both VPT root and DNA root hit today's observed target roots
+        // Dynamic — recalculates every time using current getObservedDailyRoots()
+        function computeVPTRoot(name) {
+            try {
+                var parts = name.trim().split(/\s+/);
+                var vars = {
+                    full:   name,
+                    city:   parts.length > 1 ? parts.slice(0,-1).join(' ') : name,
+                    mascot: parts[parts.length-1] || name,
+                    abbrev: parts.map(function(p){return p[0]||'';}).join('').toUpperCase()
+                };
+                // Count raw cipher VALUES (before digital root) across all variations
+                var rawCounts = {};
+                Object.values(vars).forEach(function(v) {
+                    Object.values(CIPHERS).forEach(function(fn) {
+                        var raw = fn(v);
+                        var dr  = calculateDigitalRoot(raw).root;
+                        if (dr >= 1 && dr <= 9) rawCounts[dr] = (rawCounts[dr]||0) + 1;
+                    });
+                });
+                // Dominant VPT root = highest frequency
+                return Object.keys(rawCounts).map(Number)
+                    .sort(function(a,b){ return rawCounts[b]-rawCounts[a]; })[0] || null;
+            } catch(e) { return null; }
+        }
+
+        function checkVPTDNAAlign(teamName) {
+            // Returns object: { aligned, vptRoot, dnaRoot, targets }
+            try {
+                var obs = getObservedDailyRoots();
+                var targets = (obs && obs.targets) ? obs.targets : [7,1,3];
+                var losers  = (obs && obs.losers)  ? obs.losers  : [4,5];
+                // VPT root
+                var vptRoot = computeVPTRoot(teamName);
+                // DNA dominant root (same as _domRoot in getObservedDailyRoots)
+                var parts = teamName.trim().split(/\s+/);
+                var vars = {full:teamName,city:parts.length>1?parts.slice(0,-1).join(' '):teamName,
+                    mascot:parts[parts.length-1]||teamName,
+                    abbrev:parts.map(function(p){return p[0]||'';}).join('').toUpperCase()};
+                var dnaCounts = {};
+                Object.values(vars).forEach(function(v){
+                    Object.values(CIPHERS).forEach(function(fn){
+                        var r=calculateDigitalRoot(fn(v)).root;
+                        if(r>=1&&r<=9) dnaCounts[r]=(dnaCounts[r]||0)+1;
+                    });
+                });
+                var dnaRoot = Object.keys(dnaCounts).map(Number)
+                    .sort(function(a,b){return dnaCounts[b]-dnaCounts[a];})[0] || null;
+                var vptHit  = vptRoot && targets.indexOf(vptRoot) !== -1;
+                var dnaHit  = dnaRoot && targets.indexOf(dnaRoot) !== -1;
+                var aligned = vptHit && dnaHit;
+                var bothLoser = vptRoot && losers.indexOf(vptRoot) !== -1
+                             && dnaRoot && losers.indexOf(dnaRoot) !== -1;
+                return { aligned, bothLoser, vptRoot, dnaRoot, vptHit, dnaHit, targets, losers,
+                         source: obs ? obs.source : 'fallback' };
+            } catch(e) { return { aligned:false, bothLoser:false }; }
         }
 
         // ── Daily Pulse Summary ──
@@ -25399,6 +26223,93 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
         }
 
         // ── Calendar Match Leaderboard (#24) ──────────────────────────────────────
+        // ── VPT (Vibrational Pattern Tracker) Root Computation ──
+        // Counts ALL 48 cipher values (12 ciphers × 4 name variations) per winner
+        // and identifies which roots appear most frequently across winners vs losers.
+        // Different from DNA Matrix which uses dominant root only.
+        function computeVPTRoots(dateKey) {
+            try {
+                var dk = dateKey || (function(){
+                    var d=new Date();
+                    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+                })();
+                var games = [];
+                if (typeof accuracyTracker !== 'undefined') {
+                    accuracyTracker.results.forEach(function(g) {
+                        if (g.status !== 'COMPLETED' || g.homeWon === null) return;
+                        var d = new Date(g.gameDate || g.timestamp);
+                        var gk = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+                        if (gk === dk) games.push(g);
+                    });
+                }
+                if (games.length < 3) return null; // need at least 3 games
+                // Count ALL cipher values per winner/loser (not just dominant root)
+                var winCounts = {}, lossCounts = {};
+                for (var r=1; r<=9; r++) { winCounts[r]=0; lossCounts[r]=0; }
+                games.forEach(function(g) {
+                    var winner = g.homeWon ? g.homeTeam : g.awayTeam;
+                    var loser  = g.homeWon ? g.awayTeam : g.homeTeam;
+                    function addCounts(name, counts) {
+                        try {
+                            var parts = name.trim().split(/\s+/);
+                            var vars = {
+                                full: name,
+                                city: parts.length > 1 ? parts.slice(0,-1).join(' ') : name,
+                                mascot: parts[parts.length-1] || name,
+                                abbrev: parts.map(function(p){return p[0]||'';}).join('').toUpperCase()
+                            };
+                            Object.values(vars).forEach(function(v) {
+                                Object.values(CIPHERS).forEach(function(fn) {
+                                    var r = calculateDigitalRoot(fn(v)).root;
+                                    if (r >= 1 && r <= 9) counts[r] = (counts[r]||0) + 1;
+                                });
+                            });
+                        } catch(e) {}
+                    }
+                    addCounts(winner, winCounts);
+                    addCounts(loser,  lossCounts);
+                });
+                // Score: which roots appear more in winners than losers
+                var targets = [], losers = [];
+                for (var r=1; r<=9; r++) {
+                    var w = winCounts[r]||0, l = lossCounts[r]||0, tot = w+l;
+                    if (tot < 3) continue;
+                    var pct = Math.round(w/tot*100);
+                    if (pct >= 60) targets.push(r);
+                    else if (pct <= 35) losers.push(r);
+                }
+                return { targets: targets, losers: losers, games: games.length };
+            } catch(e) { return null; }
+        }
+
+        // ── VPT+DNA Alignment: check if team's dominant root is in BOTH systems ──
+        function checkVPTDNAAlignment(teamName, vptRoots, dnaRoots) {
+            try {
+                if (!vptRoots || !dnaRoots) return false;
+                // Get team's dominant cipher root
+                var parts = teamName.trim().split(/\s+/);
+                var vars = {
+                    full: teamName,
+                    city: parts.length > 1 ? parts.slice(0,-1).join(' ') : teamName,
+                    mascot: parts[parts.length-1] || teamName,
+                    abbrev: parts.map(function(p){return p[0]||'';}).join('').toUpperCase()
+                };
+                var counts = {};
+                Object.values(vars).forEach(function(v) {
+                    Object.values(CIPHERS).forEach(function(fn) {
+                        var r = calculateDigitalRoot(fn(v)).root;
+                        if (r >= 1 && r <= 9) counts[r] = (counts[r]||0) + 1;
+                    });
+                });
+                var domRoot = Object.keys(counts).map(Number).sort(function(a,b){return counts[b]-counts[a];})[0];
+                if (!domRoot) return false;
+                // Check if dominant root appears in BOTH VPT and DNA targets
+                var inVPT = vptRoots.targets.indexOf(domRoot) !== -1;
+                var inDNA = dnaRoots.targets.indexOf(domRoot) !== -1;
+                return inVPT && inDNA ? domRoot : false;
+            } catch(e) { return false; }
+        }
+
         function renderCalendarLeaderboard() {
             var el = document.getElementById('content');
             if (!el) return;
@@ -25450,7 +26361,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 
             sortedDays.forEach(function(dk){
                 var games = byDay[dk];
-                if(games.length < 5) return; // need enough games to be meaningful
+// No minimum threshold — count every day with any completed results
 
                 // Compute confirmed winning roots for this date (same logic as DNA matrix)
                 var winRoots={}, lossRoots={};
@@ -25464,7 +26375,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                 var confirmedWinRoots=[];
                 for(var r=1;r<=9;r++){
                     var w=winRoots[r]||0,l=lossRoots[r]||0,tot=w+l;
-                    if(tot>0&&Math.round(w/tot*100)>=60) confirmedWinRoots.push(r);
+                    if(tot>=2 && Math.round(w/tot*100)>=60) confirmedWinRoots.push(r); // 60%+ win rate, min 2 appearances
                 }
                 if(confirmedWinRoots.length===0) return;
 
@@ -25524,12 +26435,12 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 
             // ── Calendar Rankings Table ──
             h+='<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;margin-bottom:16px;">';
-            h+='<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:10px;">Calendar Rankings — Best Daily VW Match Rate</div>';
+            h+='<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:10px;">🏆 ALL-TIME Calendar Rankings — Cumulative across all tracked days</div>';
             h+='<table style="width:100%;border-collapse:collapse;font-size:11px;">';
             h+='<thead><tr style="border-bottom:1px solid #1a2535;">';
             h+='<th style="padding:6px 10px;text-align:left;color:#4a5568;">#</th>';
             h+='<th style="padding:6px 10px;text-align:left;color:#4a5568;">Calendar</th>';
-            h+='<th style="padding:6px 10px;text-align:center;color:#10b981;">Days Won</th>';
+            h+='<th style="padding:6px 10px;text-align:center;color:#10b981;">Days Led (all-time)</th>';
             h+='<th style="padding:6px 10px;text-align:center;color:#3b82f6;">Win Rate</th>';
             h+='<th style="padding:6px 10px;text-align:center;color:#f59e0b;">Best Hit</th>';
             h+='<th style="padding:6px 10px;text-align:left;color:#4a5568;">Best Date</th>';
@@ -25559,7 +26470,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 
             // ── Per-Day Breakdown ──
             h+='<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:8px;padding:14px;">';
-            h+='<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:10px;">Day-by-Day Breakdown</div>';
+            h+='<div style="font-size:11px;font-weight:800;color:#fff;margin-bottom:6px;">Day-by-Day Detail</div><div style="font-size:10px;color:#4a5568;margin-bottom:8px;">Each row shows that single day — the Rankings table above accumulates all of these.</div>';
             h+='<div style="overflow-x:auto;">';
             h+='<table style="width:100%;border-collapse:collapse;font-size:10px;min-width:700px;">';
             h+='<thead><tr style="border-bottom:1px solid #1a2535;">';
@@ -25803,6 +26714,392 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
         }
 
         // ── Skip Pattern Sequence Finder (#25) ──────────────────────────────────────
+        // ════════════════════════════════════════════════════════════════════
+        // VIBRATIONAL POWER RANKING — Daily team power scores
+        // ════════════════════════════════════════════════════════════════════
+        function renderVPRanking() {
+            console.log('⚡ VPR: renderVPRanking called');
+            var el = document.getElementById('content');
+            if (!el) return;
+
+            // ── Scoring weights ──
+            var W = {
+                quadLock:      100,
+                allThreeLock:   80,
+                tripleAlign:    65,
+                matrixSeq:      55,   // matrix sequence
+                upsetAlert:     20,   // upset signal
+                trustV4:        15,   // trust V4 override
+                vptDnaAlign:    60,
+                dnaVarStrong:   50,
+                dnaVarGood:     35,
+                dnaEdge:        30,
+                v4v2agree:      25,
+                convHigh:       20,   // ≥85% conviction
+                convMed:        12,   // 70-84%
+                compositeMax:   40,   // scaled 0-40 by VW score
+                calAlignMax:    30,   // scaled by top-cal hits
+                rootOnDNA:      25,   // dominant root on DNA targets
+                rootOnVPT:      25,   // dominant root on VPT targets
+                rootOnBoth:     15,   // bonus for hitting both
+                trapT1:        -80,
+                trapT2:        -40,
+                trapLatent:    -15,
+            };
+
+            // ── Get today's signals ──
+            var _obsR  = (typeof getObservedDailyRoots==='function') ? getObservedDailyRoots() : {targets:[],losers:[]};
+            var _vptR  = (typeof computeVPTRoots==='function') ? computeVPTRoots() : null;
+            var _allVW = calculateAllCalendarsVW(new Date());
+            var CAL_KEYS = ['gregorian','ancient_roman','unc','ifc','ethiopian','pure_sol','sol','future_gregorian_plus2','gemini_rolling'];
+
+            // Active signal count for status display
+            var sigActive = 0;
+            // Sidebar signals — available as soon as sidebar renders
+            var _hasSidebar = window._sidebarPredictionsBySport && Object.keys(window._sidebarPredictionsBySport).length > 0;
+            if (_hasSidebar) sigActive += 6;  // locks, conviction, DNA VAR, trap all ready
+            // Root alignment signals — need completed games today
+            if (_obsR && _obsR.targets && _obsR.targets.length) sigActive += 2;  // DNA targets active
+            if (_vptR && _vptR.targets && _vptR.targets.length) sigActive += 2;  // VPT targets active
+            var sigTotal = 10;  // max possible
+            if (_obsR.targets.length || _vptR) sigActive += 2;
+
+            // ── Dominant root helper ──
+            function domRoot(name) {
+                try {
+                    var parts=name.trim().split(/\s+/);
+                    var vars={full:name,city:parts.length>1?parts.slice(0,-1).join(' '):name,
+                        mascot:parts[parts.length-1]||name,
+                        abbrev:parts.map(function(p){return p[0]||'';}).join('').toUpperCase()};
+                    var counts={};
+                    Object.values(vars).forEach(function(v){
+                        Object.values(CIPHERS).forEach(function(fn){
+                            var r=calculateDigitalRoot(fn(v)).root;
+                            if(r>=1&&r<=9) counts[r]=(counts[r]||0)+1;
+                        });
+                    });
+                    var keys=Object.keys(counts).map(Number).sort(function(a,b){return counts[b]-counts[a];});
+                    return {root:keys[0]||null, count:counts[keys[0]]||0, allCounts:counts};
+                } catch(e){return {root:null,count:0,allCounts:{}};}
+            }
+
+            // ── Calendar resonance score for a team ──
+            function calScore(name) {
+                try {
+                    var ts = scoreTeamVW(name, _allVW);
+                    return ts ? ts.total : 0;
+                } catch(e){return 0;}
+            }
+
+            // ── Collect all teams from ALL sources (gameWPs, pool, predictions) ──
+            var matchups = []; // {home, away, sport, gid, pred}
+            var matchupSeen = new Set();
+            var todayStr = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+
+            // Source 1: gameWPs (current tab — includes live V4 sidebar data)
+            // NOTE: include final games — VPR shows all today's games
+            gameWPs.forEach(function(gd, gid) {
+                if (!gd.data || !gd.data.homeTeam || !gd.data.awayTeam) return;
+                var gt = gd.data.startTime;
+                if (gt) { var gs=gt.getFullYear()+'-'+String(gt.getMonth()+1).padStart(2,'0')+'-'+String(gt.getDate()).padStart(2,'0'); if (gs !== todayStr) return; }
+                if (matchupSeen.has(gid)) return; matchupSeen.add(gid);
+                var pred = accuracyTracker.predictions.get(gid) || null;
+                matchups.push({ home: gd.data.homeTeam, away: gd.data.awayTeam,
+                    sport: (gd.sport||'').toUpperCase(), gid: gid, pred: pred, gd: gd });
+            });
+            // Source 2: pulseState.poolGames (all-sport background)
+            var _pool = window.pulseState && window.pulseState.poolGames ? window.pulseState.poolGames : {};
+            Object.keys(_pool).forEach(function(gid) {
+                var pg = _pool[gid];
+                if (!pg.homeTeam || !pg.awayTeam) return; // include completed games
+                if (matchupSeen.has(gid)) return; matchupSeen.add(gid);
+                var pred = accuracyTracker.predictions.get(gid) || null;
+                matchups.push({ home: pg.homeTeam, away: pg.awayTeam,
+                    sport: (pg.sport||'unk').toUpperCase(), gid: gid, pred: pred, gd: null });
+            });
+            // Source 3: pending accuracy predictions (pre-game, all sports, today only)
+            accuracyTracker.predictions.forEach(function(pred, gid) {
+                if (matchupSeen.has(gid)) return;
+                if (!pred.homeTeam || !pred.awayTeam || pred.status === 'COMPLETED') return;
+                if (pred.gameDate) {
+                    var gd2=new Date(pred.gameDate);
+                    var gs2=gd2.getFullYear()+'-'+String(gd2.getMonth()+1).padStart(2,'0')+'-'+String(gd2.getDate()).padStart(2,'0');
+                    if (gs2 !== todayStr) return;
+                }
+                matchupSeen.add(gid);
+                matchups.push({ home: pred.homeTeam, away: pred.awayTeam,
+                    sport: (pred.sport||'unk').toUpperCase(), gid: gid, pred: pred, gd: null });
+            });
+
+            // ── Score a single team ──
+            function scoreTeam(name, gid, isHome, pred, gd) {
+                var pts = 0;
+                var reasons = [];
+                // PRIMARY: sidebar predictions — search ALL cached sports
+                var sp = null;
+                var _allSidebarPreds = [];
+                if (window._sidebarPredictionsBySport) {
+                    Object.values(window._sidebarPredictionsBySport).forEach(function(arr){ if(arr) _allSidebarPreds = _allSidebarPreds.concat(arr); });
+                } else if (window._sidebarPredictions) {
+                    _allSidebarPreds = window._sidebarPredictions;
+                }
+                for (var _si=0; _si<_allSidebarPreds.length; _si++) {
+                    var _sc = _allSidebarPreds[_si];
+                    if (_sc.gameId === gid || _sc.homeTeam===name || _sc.awayTeam===name) { sp=_sc; break; }
+                }
+                // SECONDARY: stored accuracy prediction
+                var p = sp || pred;
+
+                // V4 winner — sidebar tapeWinner is authoritative
+                var v4win = sp ? sp.tapeWinner
+                    : (pred && pred.v4Winner ? pred.v4Winner
+                    : (gd && gd._tapeWinner ? gd._tapeWinner : null));
+                if (!v4win && gd && gd.data) {
+                    try {
+                        var _hvw = scoreTeamVW(gd.data.homeTeam, _allVW);
+                        var _avw = scoreTeamVW(gd.data.awayTeam, _allVW);
+                        v4win = (_hvw && _avw) ? (_hvw.total >= _avw.total ? gd.data.homeTeam : gd.data.awayTeam) : null;
+                    } catch(e) {}
+                }
+                var _isWinner = !!(v4win && v4win === name);
+
+                // Always merge ALL sidebar fields — sidebar is authoritative source
+                if (sp) {
+                    p = Object.assign({}, p||{}, {
+                        homeTeam:          sp.homeTeam,
+                        awayTeam:          sp.awayTeam,
+                        quadLock:          sp.quadLock || (sp.allThreeLock && sp.tripleAlign),
+                        allThreeLock:      sp.allThreeLock,
+                        tripleAlign:       sp.tripleAlign,
+                        v2v4agree:         sp.v4v2agree,
+                        v4VegasAgree:      sp.v4VegasAgree,
+                        upsetAlert:        sp.upsetAlert,
+                        matrixSequence:    sp.matrixSequence || false,
+                        vptDnaAlign:       !!(sp.vptDnaWinner),
+                        dnaWinnerVarScore: sp.dnaWinVarScore,
+                        dnaLoserVarScore:  sp.dnaLoseVarScore,
+                        dnaDelta:          sp.dnaDelta,
+                        trapTier:          sp.trapTier,
+                        trapFlag:          sp.trapFlag,
+                        v4ConvictionPct:   sp.v4pct || sp.v4ConvictionPct,
+                        v4ConvictionLabel: sp.v4label,
+                        skipPatternPick:   sp.skipPatternPick,
+                        skipPatternMethod: sp.skipPatternMethod,
+                        trustV4:           sp.trustV4 || false,
+                    });
+                }
+
+                // ── Badge signals (from stored prediction) ──
+                if (p) {
+                    if (p.quadLock && _isWinner)         { pts += W.quadLock;     reasons.push({t:'⚡ QUAD LOCK',       pts:W.quadLock,      col:'#f59e0b'}); }
+                    else if (p.allThreeLock && _isWinner){ pts += W.allThreeLock; reasons.push({t:'🔒 ALL-3 LOCK',      pts:W.allThreeLock,  col:'#10b981'}); }
+                    else if (p.tripleAlign && _isWinner) { pts += W.tripleAlign;  reasons.push({t:'🔐 TRIPLE LOCK',     pts:W.tripleAlign,   col:'#10b981'}); }
+                    else if (p.v2v4agree && _isWinner)   { pts += W.v4v2agree;   reasons.push({t:'V4+V2 ✓',           pts:W.v4v2agree,     col:'#667eea'}); }
+
+                    if (p.matrixSequence && _isWinner)   { pts += W.matrixSeq;   reasons.push({t:'🔢 MATRIX SEQ',      pts:W.matrixSeq,   col:'#667eea'}); }
+                if (p.upsetAlert && _isWinner)       { pts += W.upsetAlert;  reasons.push({t:'⚡ UPSET ALERT',      pts:W.upsetAlert,  col:'#f59e0b'}); }
+                if (p.trustV4 && _isWinner)          { pts += W.trustV4;     reasons.push({t:'🔬 TRUST V4',         pts:W.trustV4,     col:'#f59e0b'}); }
+                if (p.vptDnaAlign && _isWinner)      { pts += W.vptDnaAlign; reasons.push({t:'⚡🧬 VPT+DNA',       pts:W.vptDnaAlign,   col:'#fbbf24'}); }
+
+                    // DNA VAR (winner = V4 pick)
+                    if (_isWinner) {
+                        var dvs = p.dnaWinnerVarScore || 0;
+                        if (dvs >= 3)       { pts += W.dnaVarStrong; reasons.push({t:'🧬 DNA VAR STRONG', pts:W.dnaVarStrong, col:'#10b981'}); }
+                        else if (dvs === 2) { pts += W.dnaVarGood;   reasons.push({t:'🧬 DNA VAR GOOD',   pts:W.dnaVarGood,   col:'#3b82f6'}); }
+                        var delta = p.dnaDelta || 0;
+                        if (delta >= 2)     { pts += W.dnaEdge;      reasons.push({t:'🧬 DNA EDGE +'+delta, pts:W.dnaEdge, col:'#a78bfa'}); }
+                    }
+
+                    // Trap (negative — applies regardless of pick direction)
+                    if (p.trapTier === 1 && _isWinner)   { pts += W.trapT1;     reasons.push({t:'☠️ VOID LOCK',        pts:W.trapT1,  col:'#ef4444'}); }
+                    else if (p.trapTier === 2 && _isWinner){ pts += W.trapT2;   reasons.push({t:'⚡ TRAP T2',           pts:W.trapT2,  col:'#f59e0b'}); }
+
+                    // Conviction
+                    var conv = p.v4ConvictionPct || 0;
+                    if (conv >= 85)      { pts += W.convHigh; reasons.push({t:'🔮 HIGH CONV '+conv+'%', pts:W.convHigh, col:'#8b5cf6'}); }
+                    else if (conv >= 70) { pts += W.convMed;  reasons.push({t:'🔮 MED CONV '+conv+'%',  pts:W.convMed,  col:'#667eea'}); }
+                }
+
+                // ── Composite VW score (live) ──
+                var cs = calScore(name);
+                var csNorm = Math.min(W.compositeMax, Math.round((cs / 600) * W.compositeMax));
+                if (csNorm > 0) { pts += csNorm; reasons.push({t:'📅 VW Score '+cs, pts:csNorm, col:'#4a5568'}); }
+
+                // ── Calendar alignment ──
+                try {
+                    var ts2 = scoreTeamVW(name, _allVW);
+                    if (ts2 && ts2.topCals && ts2.topCals.length) {
+                        var calPts = Math.min(W.calAlignMax, ts2.topCals.length * 8);
+                        if (calPts > 0) { pts += calPts; reasons.push({t:'📆 '+ts2.topCals.length+' Cal Hits', pts:calPts, col:'#3b82f6'}); }
+                    }
+                } catch(e){}
+
+                // ── Root alignment ──
+                var dr = domRoot(name);
+                var inDNA = dr.root && _obsR.targets.indexOf(dr.root) !== -1;
+                var inVPT = dr.root && _vptR && _vptR.targets.indexOf(dr.root) !== -1;
+                if (inDNA && inVPT) {
+                    pts += W.rootOnDNA + W.rootOnVPT + W.rootOnBoth;
+                    reasons.push({t:'🧬 R'+dr.root+' DNA+VPT ✓✓', pts:W.rootOnDNA+W.rootOnVPT+W.rootOnBoth, col:'#fbbf24'});
+                } else if (inDNA) {
+                    pts += W.rootOnDNA;
+                    reasons.push({t:'🧬 R'+dr.root+' DNA ✓',  pts:W.rootOnDNA, col:'#a78bfa'});
+                } else if (inVPT) {
+                    pts += W.rootOnVPT;
+                    reasons.push({t:'🧬 R'+dr.root+' VPT ✓',  pts:W.rootOnVPT, col:'#10b981'});
+                }
+
+                return {name:name, pts:pts, reasons:reasons, root:dr.root, cs:cs, sport:'?'};
+            }
+
+            // ── Score all teams & apply matchup resistance ──
+            var allTeams = []; // {name, pts, rawPts, reasons, opponent, sport, ...}
+            var pairMap  = {};  // gid -> {home, away} scored
+
+            matchups.forEach(function(m) {
+                var hs = scoreTeam(m.home, m.gid, true,  m.pred, m.gd);
+                var as = scoreTeam(m.away, m.gid, false, m.pred, m.gd);
+                hs.sport = as.sport = m.sport;
+                hs.opponent = as.name; hs.oppScore = as.pts;
+                as.opponent = hs.name; as.oppScore = hs.pts;
+                pairMap[m.gid] = {home:hs, away:as};
+            });
+
+            // Apply matchup resistance AFTER all raw scores computed
+            // If opponent's raw score > your raw score: you lose (oppScore - yourScore) * 0.15 pts
+            Object.values(pairMap).forEach(function(pair) {
+                [pair.home, pair.away].forEach(function(t) {
+                    t.rawPts = t.pts;
+                    var resistance = t.oppScore > t.pts ? Math.round((t.oppScore - t.pts) * 0.15) : 0;
+                    if (resistance > 0) {
+                        t.pts = Math.max(0, t.pts - resistance);
+                        t.reasons.push({t:'⚔️ Matchup Resist -'+resistance, pts:-resistance, col:'#4a5568'});
+                    }
+                    allTeams.push(t);
+                });
+            });
+
+            // Sort by final score
+            allTeams.sort(function(a,b){ return b.pts - a.pts; });
+
+            // ── Render ──
+            function badge(r) {
+                var col = r.pts < 0 ? '#ef4444' : r.col;
+                return '<span style="font-size:9px;background:'+col+'18;border:1px solid '+col+'44;color:'+col+';border-radius:3px;padding:1px 6px;margin:1px;white-space:nowrap;">'+(r.pts>0?'+':'')+r.pts+' '+r.t+'</span>';
+            }
+
+            function rankBadge(i) {
+                if (i===0) return '<span style="font-size:13px;font-weight:900;color:#fbbf24;">🥇</span>';
+                if (i===1) return '<span style="font-size:13px;font-weight:900;color:#9ca3af;">🥈</span>';
+                if (i===2) return '<span style="font-size:13px;font-weight:900;color:#b45309;">🥉</span>';
+                return '<span style="font-size:11px;color:#4a5568;font-weight:700;min-width:18px;text-align:center;">'+(i+1)+'</span>';
+            }
+
+            function renderList(teams) {
+                if (!teams.length) return '<div style="color:#4a5568;padding:20px;text-align:center;">No games found for today</div>';
+                // Track which team in each matchup ranks higher (badges only on higher)
+                var higherByGid = {};
+                Object.values(pairMap).forEach(function(pair) {
+                    if (pair.home.pts >= pair.away.pts) {
+                        higherByGid[pair.home.name] = true;
+                        higherByGid[pair.away.name] = false;
+                    } else {
+                        higherByGid[pair.away.name] = true;
+                        higherByGid[pair.home.name] = false;
+                    }
+                });
+                var h = '';
+                teams.forEach(function(t, i) {
+                    var rootCol = t.root ? (
+                        _obsR.targets.indexOf(t.root)!==-1 ? '#a78bfa' :
+                        _obsR.losers.indexOf(t.root)!==-1  ? '#ef4444' : '#4a5568'
+                    ) : '#4a5568';
+                    var barW = Math.min(100, Math.round((t.pts / (teams[0].pts||1)) * 100));
+                    var barCol = t.pts >= 200 ? '#f59e0b' : t.pts >= 120 ? '#a78bfa' : t.pts >= 70 ? '#3b82f6' : '#4a5568';
+                    h += '<div style="background:#0a0e15;border:1px solid '+(i<3?barCol+'66':'#1a2535')+';border-radius:8px;padding:10px 14px;margin-bottom:6px;">';
+                    h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">';
+                    h += '<div style="flex-shrink:0;">'+rankBadge(i)+'</div>';
+                    h += '<div style="flex:1;min-width:0;">';
+                    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">';
+                    h += '<span style="font-size:13px;font-weight:800;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+t.name+'</span>';
+                    h += '<span style="font-size:14px;font-weight:900;color:'+barCol+';flex-shrink:0;">'+t.pts+' pts</span>';
+                    h += '</div>';
+                    h += '<div style="display:flex;align-items:center;gap:8px;margin-top:3px;">';
+                    h += '<div style="flex:1;background:#1a2535;border-radius:2px;height:4px;"><div style="width:'+barW+'%;background:'+barCol+';height:4px;border-radius:2px;"></div></div>';
+                    h += '<span style="font-size:10px;color:#4a5568;flex-shrink:0;">'+t.sport+'</span>';
+                    if (t.root) h += '<span style="font-size:10px;font-weight:700;color:'+rootCol+';">R'+t.root+'</span>';
+                    h += '<span style="font-size:10px;color:#4a5568;">vs <span style="color:#6b7280;">'+t.opponent+'</span></span>';
+                    h += '</div></div></div>';
+                    if (t.reasons.length && higherByGid[t.name] !== false) {
+                        h += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">';
+                        t.reasons.forEach(function(r){ h += badge(r); });
+                        h += '</div>';
+                    } else if (t.reasons.length) {
+                        // Lower-ranked: show score only, no badges
+                        h += '<div style="font-size:9px;color:#2a3142;margin-top:3px;">Lower-ranked in matchup · badges shown on '+t.opponent.split(' ').slice(-1)[0]+'</div>';
+                    }
+                    h += '</div>';
+                });
+                return h;
+            }
+
+            // ── Build page ──
+            var sports = ['ALL'];
+            allTeams.forEach(function(t){ if (t.sport && sports.indexOf(t.sport)===-1) sports.push(t.sport); });
+            sports.sort(function(a,b){ return a==='ALL'?-1:b==='ALL'?1:a<b?-1:1; });
+
+            var h = '<div style="max-width:1100px;margin:0 auto;padding:20px;">';
+            h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">';
+            h += '<button onclick="renderAccuracyDashboard()" style="background:#1a2535;border:1px solid #2a3142;color:#8b92a7;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;">← Back</button>';
+            h += '<button onclick="renderVPRanking()" style="background:#fbbf2422;border:1px solid #fbbf2455;color:#fbbf24;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">🔄 Refresh</button>';
+            h += '<h2 style="margin:0;color:#fbbf24;font-size:16px;font-weight:800;">⚡ Vibrational Power Ranking</h2>';
+            h += '<span style="font-size:11px;color:#4a5568;">'+allTeams.length+' teams today · '+sigActive+'/'+sigTotal+' signals active</span>';
+            h += '</div>';
+
+            // Signal status bar
+            var sigPct = Math.round(sigActive/sigTotal*100);
+            var sigCol = sigPct >= 70 ? '#10b981' : sigPct >= 40 ? '#f59e0b' : '#ef4444';
+            h += '<div style="background:#0a0e15;border:1px solid #1a2535;border-radius:6px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">';
+            h += '<span style="font-size:11px;color:#4a5568;">Signal readiness:</span>';
+            h += '<div style="flex:1;background:#1a2535;border-radius:3px;height:6px;"><div style="width:'+sigPct+'%;background:'+sigCol+';height:6px;border-radius:3px;"></div></div>';
+            h += '<span style="font-size:11px;font-weight:700;color:'+sigCol+';">'+sigPct+'%</span>';
+            h += '<span style="font-size:10px;color:#4a5568;">' + (_hasSidebar ? (sigPct>=80 ? 'All signals active' : 'Root signals activate as games complete') : 'Open a sport tab first') + '</span>';
+            h += '</div>';
+
+            // Sport filter tabs
+            h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;" id="vpr-sport-tabs">';
+            sports.forEach(function(sp) {
+                var active = sp==='ALL';
+                h += '<button onclick="vprFilterSport(\''+sp+'\')" data-sport="'+sp+'" style="padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;border:1px solid '+(active?'#fbbf24':'#2a3142')+';background:'+(active?'#fbbf2422':'#1a2535')+';color:'+(active?'#fbbf24':'#8b92a7')+';">'+sp+'</button>';
+            });
+            h += '</div>';
+
+            // Ranking list
+            h += '<div id="vpr-list">';
+            h += renderList(allTeams);
+            h += '</div>';
+
+            // Store data globally for sport filtering
+            window._vprAllTeams = allTeams;
+            window._vprRenderList = renderList;
+
+            h += '</div>';
+            el.innerHTML = h;
+        }
+
+        function vprFilterSport(sp) {
+            var teams = (window._vprAllTeams||[]).filter(function(t){return sp==='ALL'||t.sport===sp;});
+            var list = document.getElementById('vpr-list');
+            if (list && window._vprRenderList) list.innerHTML = window._vprRenderList(teams);
+            // Update tab styles
+            document.querySelectorAll('#vpr-sport-tabs button').forEach(function(btn){
+                var active = btn.getAttribute('data-sport')===sp;
+                btn.style.borderColor = active?'#fbbf24':'#2a3142';
+                btn.style.background  = active?'#fbbf2422':'#1a2535';
+                btn.style.color       = active?'#fbbf24':'#8b92a7';
+            });
+        }
+
         function renderSkipPatternFinder() {
             var el = document.getElementById('content');
             if (!el) return;
@@ -26372,7 +27669,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 
             // Source 1: today's completed games (need 3+ to be meaningful)
             var todayGames = _gamesForDate(todayKey);
-            if(todayGames.length >= 3) {
+            if(todayGames.length >= 1) {
                 var r1 = _computeRoots(todayGames);
                 if(r1.targets.length > 0) {
                     return {targets:r1.targets, losers:r1.losers,
@@ -26390,7 +27687,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 
             // Source 3: yesterday's completed games
             var yesterdayGames = _gamesForDate(yesterdayKey);
-            if(yesterdayGames.length >= 5) {
+            if(yesterdayGames.length >= 3) {
                 var r2 = _computeRoots(yesterdayGames);
                 if(r2.targets.length > 0) {
                     return {targets:r2.targets, losers:r2.losers,
