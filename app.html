@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Chronos-WP V4 - Vibrational Weather Prediction Engine</title>
+    <title>Chronos-WP v4.1.8 - Sports Prediction Engine</title>
 
     <!-- PWA: Add to Home Screen -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -1590,7 +1590,7 @@
 <body>
     <div class="header">
         <div class="header-content">
-            <div class="logo">🔮 CHRONOS-WP V4</div>
+            <div class="logo">🔮 CHRONOS-WP <span style=\"font-size:9px;color:#f59e0b;font-weight:700;vertical-align:middle;letter-spacing:1px;\">v4.1.8</span></div>
             <div class="sport-tabs">
                 <button class="sport-tab active" data-sport="nba" onclick="switchSport('nba')">🏀 NBA</button>
                 <button class="sport-tab" data-sport="nfl" onclick="switchSport('nfl')">🏈 NFL</button>
@@ -3194,7 +3194,7 @@ function lookupTeam(teamName) {
             results: new Set(), // WIN, LOSS
             sortColumn: 'date',
             sortDirection: 'desc',
-            excludeMLB: true,    // Default ON — spring training MLB excluded from totals
+            excludeMLB: false,   // Default OFF — MLB regular season started, included in totals
             excludeSoccer: true, // Default ON — no Vegas lines or strong V2 model
             v4View: false,       // V4 Standalone view — scores V4 pick independently of V2
             tapeOnly: false      // Show only isTapeMatch predictions (Tennis, MMA, Boxing)
@@ -3996,6 +3996,7 @@ function lookupTeam(teamName) {
         };
 
         let currentSport = 'nba';
+        let _fetchGeneration = 0; // increments on sport switch; stale fetches are discarded
         let games = [];
         let gameWPs = new Map();
         let refreshInterval;
@@ -5349,6 +5350,7 @@ function lookupTeam(teamName) {
                     espnGameId: gameId,
                     timestamp: Date.now(),
                     gameDate: gameData.startTime ? gameData.startTime.getTime() : Date.now(),
+                    gameTime: gameData.startTime ? gameData.startTime.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : null,
                     sport: (currentSport || '').toLowerCase(),
                     homeTeam: gameData.homeTeam,
                     awayTeam: gameData.awayTeam,
@@ -5869,6 +5871,22 @@ function lookupTeam(teamName) {
                     prediction.v2TotalCorrect = null;
                 }
                 
+                // ── Compute VPT+DNA at resolution time (needs completed games for context) ──
+                try {
+                    if (typeof computeVPTRoots === 'function' && typeof checkVPTDNAAlignment === 'function') {
+                        var _vr2 = computeVPTRoots();
+                        var _dr2 = typeof getObservedDailyRoots === 'function' ? getObservedDailyRoots() : null;
+                        if (_vr2 && _dr2) {
+                            var _winner2 = prediction.homeWon ? prediction.homeTeam : prediction.awayTeam;
+                            var _loser2  = prediction.homeWon ? prediction.awayTeam : prediction.homeTeam;
+                            prediction.vptDnaAlign = checkVPTDNAAlignment(_winner2, _vr2, _dr2) || false;
+                            prediction.vptDnaLoser = checkVPTDNAAlignment(_loser2,  _vr2, _dr2) || false;
+                            if (prediction.vptDnaAlign) {
+                                console.log('⚡🧬 VPT+DNA ALIGN confirmed at resolve for', _winner2, 'R'+prediction.vptDnaAlign);
+                            }
+                        }
+                    }
+                } catch(e) {}
                 // Move to results
                 this.results.set(gameId, prediction);
                 this.predictions.delete(gameId);
@@ -5901,10 +5919,19 @@ function lookupTeam(teamName) {
             // Generate sport-specific report
             generateSportReport(sport) {
                 const isTapeSport = (sport === 'tennis' || sport === 'mma' || sport === 'lacrosse' || sport === 'cricket' || sport === 'boxing' || sport === 'esports' || sport === 'rugby');
+                const _MLB_OPENING_DAY = new Date('2026-03-25T00:00:00').getTime();
                 const sportGames = Array.from(this.results.values())
-                    .filter(g => (g.sport || '').toLowerCase() === sport.toLowerCase());
+                    .filter(g => {
+                        if ((g.sport || '').toLowerCase() !== sport.toLowerCase()) return false;
+                        // For MLB: discard pre-Opening Day games (spring training)
+                        if (sport === 'mlb') {
+                            const gd = g.gameDate ? new Date(g.gameDate).getTime() : 0;
+                            if (gd > 0 && gd < _MLB_OPENING_DAY) return false;
+                        }
+                        return true;
+                    });
                 const _sportEmojiMap = {tennis:'🎾',mma:'🥊',lacrosse:'🥍',cricket:'🏏',boxing:'🥊',esports:'🎮',rugby:'🏉'};
-                const _sportNameMap  = {tennis:'Tennis',mma:'MMA / UFC',lacrosse:'Lacrosse',cricket:'Cricket',boxing:'Boxing',esports:'E-Sports',rugby:'Rugby'};
+                const _sportNameMap  = {tennis:'Tennis','tennis-atp':'Tennis - ATP','tennis-wta':'Tennis - WTA',mma:'MMA / UFC',lacrosse:'Lacrosse',cricket:'Cricket',boxing:'Boxing',esports:'E-Sports',rugby:'Rugby',cba:'CBA (Chinese Basketball)',euroleague:'Euroleague',soccer_friendly:'Soccer — Intl Friendlies'};
                 const sportEmoji = _sportEmojiMap[sport] || '';
                 const sportDisplayName = _sportNameMap[sport] || sport.toUpperCase();
                 if (sportGames.length === 0) {
@@ -6001,10 +6028,16 @@ function lookupTeam(teamName) {
                 // Respect MLB exclusion toggle
                 const excludeMLB    = typeof accuracyFilters !== 'undefined' && accuracyFilters.excludeMLB;
                 const excludeSoccer = typeof accuracyFilters !== 'undefined' && accuracyFilters.excludeSoccer;
+                const MLB_OPENING_DAY = new Date('2026-03-25T00:00:00').getTime();
                 const completed = allCompleted.filter(g => {
                     const sp = (g.sport || '').toLowerCase();
                     if (excludeMLB    && sp === 'mlb')    return false;
                     if (excludeSoccer && sp === 'soccer') return false;
+                    // Discard MLB games before Opening Day (spring training)
+                    if (sp === 'mlb') {
+                        const gd = g.gameDate ? new Date(g.gameDate).getTime() : 0;
+                        if (gd > 0 && gd < MLB_OPENING_DAY) return false;
+                    }
                     return true;
                 });
                 const mlbExcludedCount    = allCompleted.filter(g => (g.sport||'').toLowerCase()==='mlb').length;
@@ -6789,13 +6822,96 @@ function lookupTeam(teamName) {
             '_DEFAULT_CFB': { points_per_drive: 2.3, plays_per_drive: 6.2, seconds_per_play: 6.5, true_turnover_rate: 0.10, explosive_per_drive: 0.40 },
             '_DEFAULT_NFL': { points_per_drive: 2.0, plays_per_drive: 5.8, seconds_per_play: 6.8, true_turnover_rate: 0.10, explosive_per_drive: 0.38 },
             '_DEFAULT_NBA': { points_per_drive: 1.17, plays_per_drive: 1.0, seconds_per_play: 14.5, true_turnover_rate: 0.135, explosive_per_drive: 0.40 },  // UPDATED: 1.17 PPP
-            '_DEFAULT_CBB': { points_per_drive: 1.07, plays_per_drive: 1.0, seconds_per_play: 18.2, true_turnover_rate: 0.155, explosive_per_drive: 0.35 }  // UPDATED: 1.07 PPP
-        };
+            '_DEFAULT_CBB': { points_per_drive: 1.07, plays_per_drive: 1.0, seconds_per_play: 18.2, true_turnover_rate: 0.155, explosive_per_drive: 0.35 },  // UPDATED: 1.07 PPP,
+            // ── MLB Teams — ERA-based efficiency ratings (2025 season estimates) ──
+            // runs_per_inning = team run scoring efficiency (lgAvg = 0.506)
+            // era_plus = pitcher quality index (100 = league avg, higher = better)
+            // fip = Fielding Independent Pitching (lower = better, lgAvg ~4.20)
+            // babip = Batting Average on Balls in Play (lgAvg ~.295)
+            // obp = On-Base Percentage (lgAvg ~.318)
+            // slg = Slugging Percentage (lgAvg ~.413)
+            // bullpen_era = bullpen ERA (lgAvg ~4.10)
+            // home_run_rate = HR per game (lgAvg ~1.3)
+            'Yankees':     { runs_per_inning: 0.556, era_plus: 112, fip: 3.85, babip: 0.298, obp: 0.334, slg: 0.445, bullpen_era: 3.65, home_run_rate: 1.6 },
+            'Red Sox':     { runs_per_inning: 0.534, era_plus: 98,  fip: 4.22, babip: 0.301, obp: 0.327, slg: 0.432, bullpen_era: 4.20, home_run_rate: 1.4 },
+            'Blue Jays':   { runs_per_inning: 0.521, era_plus: 102, fip: 4.10, babip: 0.292, obp: 0.322, slg: 0.428, bullpen_era: 3.95, home_run_rate: 1.5 },
+            'Rays':        { runs_per_inning: 0.518, era_plus: 108, fip: 3.92, babip: 0.288, obp: 0.320, slg: 0.418, bullpen_era: 3.75, home_run_rate: 1.2 },
+            'Orioles':     { runs_per_inning: 0.543, era_plus: 105, fip: 4.05, babip: 0.295, obp: 0.328, slg: 0.448, bullpen_era: 3.85, home_run_rate: 1.7 },
+            'Astros':      { runs_per_inning: 0.561, era_plus: 115, fip: 3.72, babip: 0.302, obp: 0.336, slg: 0.452, bullpen_era: 3.55, home_run_rate: 1.5 },
+            'Rangers':     { runs_per_inning: 0.528, era_plus: 99,  fip: 4.18, babip: 0.296, obp: 0.324, slg: 0.431, bullpen_era: 4.05, home_run_rate: 1.4 },
+            'Angels':      { runs_per_inning: 0.498, era_plus: 93,  fip: 4.38, babip: 0.301, obp: 0.315, slg: 0.408, bullpen_era: 4.45, home_run_rate: 1.3 },
+            'Athletics':   { runs_per_inning: 0.489, era_plus: 96,  fip: 4.28, babip: 0.288, obp: 0.312, slg: 0.398, bullpen_era: 4.30, home_run_rate: 1.2 },
+            'Mariners':    { runs_per_inning: 0.512, era_plus: 110, fip: 3.88, babip: 0.285, obp: 0.318, slg: 0.415, bullpen_era: 3.70, home_run_rate: 1.3 },
+            'Dodgers':     { runs_per_inning: 0.578, era_plus: 118, fip: 3.65, babip: 0.305, obp: 0.342, slg: 0.462, bullpen_era: 3.45, home_run_rate: 1.8 },
+            'Giants':      { runs_per_inning: 0.522, era_plus: 103, fip: 4.08, babip: 0.293, obp: 0.323, slg: 0.422, bullpen_era: 3.90, home_run_rate: 1.4 },
+            'Padres':      { runs_per_inning: 0.535, era_plus: 107, fip: 3.95, babip: 0.294, obp: 0.328, slg: 0.438, bullpen_era: 3.75, home_run_rate: 1.5 },
+            'Rockies':     { runs_per_inning: 0.531, era_plus: 88,  fip: 4.62, babip: 0.318, obp: 0.321, slg: 0.435, bullpen_era: 4.80, home_run_rate: 1.6 },
+            'Diamondbacks':{ runs_per_inning: 0.533, era_plus: 101, fip: 4.15, babip: 0.297, obp: 0.325, slg: 0.430, bullpen_era: 4.00, home_run_rate: 1.4 },
+            'Braves':      { runs_per_inning: 0.562, era_plus: 109, fip: 3.90, babip: 0.300, obp: 0.337, slg: 0.450, bullpen_era: 3.80, home_run_rate: 1.7 },
+            'Mets':        { runs_per_inning: 0.541, era_plus: 106, fip: 3.98, babip: 0.296, obp: 0.329, slg: 0.440, bullpen_era: 3.85, home_run_rate: 1.5 },
+            'Phillies':    { runs_per_inning: 0.548, era_plus: 108, fip: 3.92, babip: 0.299, obp: 0.331, slg: 0.445, bullpen_era: 3.78, home_run_rate: 1.6 },
+            'Marlins':     { runs_per_inning: 0.492, era_plus: 95,  fip: 4.32, babip: 0.292, obp: 0.313, slg: 0.400, bullpen_era: 4.35, home_run_rate: 1.2 },
+            'Nationals':   { runs_per_inning: 0.508, era_plus: 97,  fip: 4.25, babip: 0.298, obp: 0.319, slg: 0.415, bullpen_era: 4.20, home_run_rate: 1.3 },
+            'Cubs':        { runs_per_inning: 0.530, era_plus: 104, fip: 4.05, babip: 0.294, obp: 0.325, slg: 0.433, bullpen_era: 3.92, home_run_rate: 1.5 },
+            'Cardinals':   { runs_per_inning: 0.525, era_plus: 105, fip: 4.02, babip: 0.291, obp: 0.322, slg: 0.428, bullpen_era: 3.88, home_run_rate: 1.4 },
+            'Brewers':     { runs_per_inning: 0.527, era_plus: 107, fip: 3.96, babip: 0.289, obp: 0.324, slg: 0.430, bullpen_era: 3.72, home_run_rate: 1.4 },
+            'Pirates':     { runs_per_inning: 0.501, era_plus: 96,  fip: 4.28, babip: 0.293, obp: 0.316, slg: 0.408, bullpen_era: 4.25, home_run_rate: 1.2 },
+            'Reds':        { runs_per_inning: 0.519, era_plus: 99,  fip: 4.18, babip: 0.298, obp: 0.321, slg: 0.422, bullpen_era: 4.10, home_run_rate: 1.5 },
+            'Indians':     { runs_per_inning: 0.524, era_plus: 106, fip: 4.00, babip: 0.290, obp: 0.323, slg: 0.427, bullpen_era: 3.82, home_run_rate: 1.4 },
+            'Guardians':   { runs_per_inning: 0.524, era_plus: 106, fip: 4.00, babip: 0.290, obp: 0.323, slg: 0.427, bullpen_era: 3.82, home_run_rate: 1.4 },
+            'Tigers':      { runs_per_inning: 0.516, era_plus: 103, fip: 4.08, babip: 0.291, obp: 0.319, slg: 0.420, bullpen_era: 3.95, home_run_rate: 1.3 },
+            'Royals':      { runs_per_inning: 0.513, era_plus: 100, fip: 4.12, babip: 0.294, obp: 0.318, slg: 0.418, bullpen_era: 4.05, home_run_rate: 1.3 },
+            'Twins':       { runs_per_inning: 0.538, era_plus: 105, fip: 4.02, babip: 0.294, obp: 0.328, slg: 0.440, bullpen_era: 3.88, home_run_rate: 1.6 },
+            'White Sox':   { runs_per_inning: 0.485, era_plus: 88,  fip: 4.65, babip: 0.303, obp: 0.310, slg: 0.395, bullpen_era: 4.75, home_run_rate: 1.2 },
+            // MLB league defaults
+            '_DEFAULT_MLB': { runs_per_inning: 0.506, era_plus: 100, fip: 4.20, babip: 0.295, obp: 0.318, slg: 0.413, bullpen_era: 4.10, home_run_rate: 1.3 },
+        // Alias keys for ESPN partial-match misses
+        'Sox':  { runs_per_inning: 0.530, era_plus: 100, fip: 4.12, babip: 0.296, obp: 0.323, slg: 0.425, bullpen_era: 4.05, home_run_rate: 1.4 }, // generic Sox fallback
+        'Jays': { runs_per_inning: 0.521, era_plus: 102, fip: 4.10, babip: 0.292, obp: 0.322, slg: 0.428, bullpen_era: 3.95, home_run_rate: 1.5 }, // Blue Jays alias
 
-        // ============================================
-        // VEGAS-IMPLIED PRIORS
-        // ============================================
-        function deriveVegasImpliedPriors({
+        // ── NHL Teams — shot-efficiency ratings (goals/shot attempt ~0.095 lgAvg) ──
+        // ── NHL Teams — V2 shot-efficiency + PP/PK/SV priors (2024-25 season) ──
+        // points_per_drive = goals/shot attempt (~0.095 lgAvg)
+        // pace = shots/game (~30 lgAvg) | pp_pct = power play % | pk_pct = penalty kill %
+        // sv_pct = save % | cf_pct = Corsi For % | gf_60 = goals for/60 | ga_60 = goals against/60
+        'Bruins':       { points_per_drive:0.102, pace:31.2, true_turnover_rate:0.108, explosive_per_drive:0.12, pp_pct:21.8, pk_pct:82.1, sv_pct:0.912, cf_pct:51.8, gf_60:3.05, ga_60:2.72 },
+        'Sabres':       { points_per_drive:0.088, pace:28.8, true_turnover_rate:0.122, explosive_per_drive:0.09, pp_pct:18.2, pk_pct:78.4, sv_pct:0.898, cf_pct:47.5, gf_60:2.62, ga_60:3.10 },
+        'Canadiens':    { points_per_drive:0.091, pace:29.5, true_turnover_rate:0.118, explosive_per_drive:0.10, pp_pct:19.5, pk_pct:79.8, sv_pct:0.902, cf_pct:48.8, gf_60:2.74, ga_60:2.98 },
+        'Senators':     { points_per_drive:0.094, pace:30.1, true_turnover_rate:0.115, explosive_per_drive:0.10, pp_pct:20.1, pk_pct:80.5, sv_pct:0.905, cf_pct:49.6, gf_60:2.82, ga_60:2.88 },
+        'Maple Leafs':  { points_per_drive:0.103, pace:32.0, true_turnover_rate:0.110, explosive_per_drive:0.13, pp_pct:22.4, pk_pct:81.2, sv_pct:0.908, cf_pct:52.1, gf_60:3.12, ga_60:2.80 },
+        'Hurricanes':   { points_per_drive:0.105, pace:31.8, true_turnover_rate:0.105, explosive_per_drive:0.13, pp_pct:23.1, pk_pct:83.5, sv_pct:0.916, cf_pct:54.2, gf_60:3.08, ga_60:2.55 },
+        'Panthers':     { points_per_drive:0.104, pace:30.9, true_turnover_rate:0.108, explosive_per_drive:0.12, pp_pct:22.8, pk_pct:82.8, sv_pct:0.914, cf_pct:53.1, gf_60:3.10, ga_60:2.62 },
+        'Lightning':    { points_per_drive:0.100, pace:30.5, true_turnover_rate:0.112, explosive_per_drive:0.11, pp_pct:21.5, pk_pct:81.8, sv_pct:0.910, cf_pct:51.2, gf_60:2.98, ga_60:2.74 },
+        'Capitals':     { points_per_drive:0.099, pace:29.8, true_turnover_rate:0.115, explosive_per_drive:0.11, pp_pct:20.8, pk_pct:80.2, sv_pct:0.906, cf_pct:50.1, gf_60:2.92, ga_60:2.85 },
+        'Blackhawks':   { points_per_drive:0.086, pace:28.2, true_turnover_rate:0.128, explosive_per_drive:0.09, pp_pct:17.5, pk_pct:77.8, sv_pct:0.895, cf_pct:46.2, gf_60:2.52, ga_60:3.25 },
+        'Red Wings':    { points_per_drive:0.090, pace:29.0, true_turnover_rate:0.120, explosive_per_drive:0.10, pp_pct:18.8, pk_pct:79.1, sv_pct:0.901, cf_pct:48.2, gf_60:2.68, ga_60:3.02 },
+        'Predators':    { points_per_drive:0.099, pace:30.5, true_turnover_rate:0.113, explosive_per_drive:0.11, pp_pct:20.5, pk_pct:80.8, sv_pct:0.908, cf_pct:50.5, gf_60:2.90, ga_60:2.82 },
+        'Blues':        { points_per_drive:0.097, pace:30.2, true_turnover_rate:0.112, explosive_per_drive:0.11, pp_pct:20.2, pk_pct:80.5, sv_pct:0.905, cf_pct:49.8, gf_60:2.86, ga_60:2.88 },
+        'Avalanche':    { points_per_drive:0.106, pace:32.5, true_turnover_rate:0.108, explosive_per_drive:0.13, pp_pct:23.5, pk_pct:82.0, sv_pct:0.910, cf_pct:53.8, gf_60:3.18, ga_60:2.68 },
+        'Stars':        { points_per_drive:0.101, pace:30.8, true_turnover_rate:0.110, explosive_per_drive:0.12, pp_pct:21.2, pk_pct:81.5, sv_pct:0.912, cf_pct:51.5, gf_60:2.98, ga_60:2.70 },
+        'Jets':         { points_per_drive:0.103, pace:31.4, true_turnover_rate:0.108, explosive_per_drive:0.12, pp_pct:22.0, pk_pct:82.5, sv_pct:0.914, cf_pct:52.5, gf_60:3.05, ga_60:2.62 },
+        'Wild':         { points_per_drive:0.098, pace:30.0, true_turnover_rate:0.114, explosive_per_drive:0.11, pp_pct:20.4, pk_pct:80.8, sv_pct:0.907, cf_pct:50.4, gf_60:2.88, ga_60:2.80 },
+        'Penguins':     { points_per_drive:0.094, pace:29.5, true_turnover_rate:0.118, explosive_per_drive:0.10, pp_pct:19.8, pk_pct:80.0, sv_pct:0.904, cf_pct:49.2, gf_60:2.78, ga_60:2.92 },
+        'Flyers':       { points_per_drive:0.089, pace:28.9, true_turnover_rate:0.124, explosive_per_drive:0.09, pp_pct:18.4, pk_pct:78.8, sv_pct:0.899, cf_pct:47.8, gf_60:2.64, ga_60:3.08 },
+        'Islanders':    { points_per_drive:0.093, pace:28.5, true_turnover_rate:0.116, explosive_per_drive:0.10, pp_pct:19.2, pk_pct:79.5, sv_pct:0.903, cf_pct:49.0, gf_60:2.72, ga_60:2.95 },
+        'Rangers':      { points_per_drive:0.102, pace:31.5, true_turnover_rate:0.110, explosive_per_drive:0.12, pp_pct:21.8, pk_pct:81.8, sv_pct:0.913, cf_pct:52.0, gf_60:3.02, ga_60:2.68 },
+        'Devils':       { points_per_drive:0.097, pace:30.5, true_turnover_rate:0.114, explosive_per_drive:0.11, pp_pct:20.5, pk_pct:80.5, sv_pct:0.906, cf_pct:50.2, gf_60:2.88, ga_60:2.84 },
+        'Sharks':       { points_per_drive:0.085, pace:27.8, true_turnover_rate:0.130, explosive_per_drive:0.08, pp_pct:17.2, pk_pct:77.5, sv_pct:0.893, cf_pct:45.8, gf_60:2.48, ga_60:3.32 },
+        'Ducks':        { points_per_drive:0.087, pace:28.2, true_turnover_rate:0.126, explosive_per_drive:0.09, pp_pct:17.8, pk_pct:78.2, sv_pct:0.897, cf_pct:46.8, gf_60:2.56, ga_60:3.18 },
+        'Kings':        { points_per_drive:0.096, pace:29.8, true_turnover_rate:0.114, explosive_per_drive:0.11, pp_pct:20.0, pk_pct:80.2, sv_pct:0.908, cf_pct:50.0, gf_60:2.84, ga_60:2.82 },
+        'Oilers':       { points_per_drive:0.107, pace:32.8, true_turnover_rate:0.112, explosive_per_drive:0.13, pp_pct:24.2, pk_pct:81.5, sv_pct:0.912, cf_pct:53.2, gf_60:3.22, ga_60:2.72 },
+        'Flames':       { points_per_drive:0.094, pace:29.2, true_turnover_rate:0.118, explosive_per_drive:0.10, pp_pct:19.5, pk_pct:79.8, sv_pct:0.904, cf_pct:49.2, gf_60:2.78, ga_60:2.92 },
+        'Canucks':      { points_per_drive:0.097, pace:30.0, true_turnover_rate:0.116, explosive_per_drive:0.11, pp_pct:20.5, pk_pct:80.2, sv_pct:0.906, cf_pct:50.1, gf_60:2.88, ga_60:2.84 },
+        'Kraken':       { points_per_drive:0.095, pace:29.5, true_turnover_rate:0.116, explosive_per_drive:0.10, pp_pct:20.0, pk_pct:80.0, sv_pct:0.906, cf_pct:50.0, gf_60:2.82, ga_60:2.86 },
+        'Golden Knights': { points_per_drive:0.104, pace:31.2, true_turnover_rate:0.108, explosive_per_drive:0.12, pp_pct:22.5, pk_pct:82.2, sv_pct:0.913, cf_pct:52.8, gf_60:3.08, ga_60:2.62 },
+        'Mammoth':      { points_per_drive:0.096, pace:30.2, true_turnover_rate:0.115, explosive_per_drive:0.11, pp_pct:20.2, pk_pct:80.5, sv_pct:0.906, cf_pct:50.2, gf_60:2.85, ga_60:2.86 },
+        '_DEFAULT_NHL': { points_per_drive:0.095, pace:30.0, true_turnover_rate:0.117, explosive_per_drive:0.10, pp_pct:20.0, pk_pct:80.0, sv_pct:0.906, cf_pct:50.0, gf_60:2.80, ga_60:2.80 },
+            };
+
+            // ============================================
+            // VEGAS-IMPLIED PRIORS
+            // ============================================
+            function deriveVegasImpliedPriors({
             vegasTotal,
             vegasSpreadAway,
             sportConfig,
@@ -6942,6 +7058,10 @@ function lookupTeam(teamName) {
                 defaultKey = '_DEFAULT_NBA';
             } else if (sport === 'cbb') {
                 defaultKey = '_DEFAULT_CBB';
+            } else if (sport === 'mlb') {
+                defaultKey = '_DEFAULT_MLB';
+            } else if (sport === 'nhl') {
+                defaultKey = '_DEFAULT_NHL';
             } else {
                 defaultKey = '_DEFAULT_CFB';
             }
@@ -10538,6 +10658,68 @@ function _showBracketTable() {
                         </div>
                     </div>
                     
+                    <!-- Parlay Combinator -->
+                    <div class="lab-section" style="background:#1a1f2e;border:1px solid #2a3142;border-radius:10px;padding:20px;margin-top:16px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+                            <div>
+                                <h2 style="color:#fff;margin:0 0 3px 0;font-size:16px;">&#127922; Parlay Combinator</h2>
+                                <p style="color:#4a5568;font-size:10px;margin:0;">Build combination parlays from core locks + flex picks &middot; Moneyline only &middot; Kalshi manual submission</p>
+                            </div>
+                            <span style="font-size:9px;color:#f59e0b;background:#f59e0b11;border:1px solid #f59e0b33;border-radius:3px;padding:3px 8px;font-weight:700;">v4.1.8</span>
+                        </div>
+                        <div style="background:#080c12;border:1px solid #1a2535;border-radius:6px;padding:10px 12px;margin-bottom:12px;">
+                            <div style="font-size:9px;color:#667eea;font-weight:700;letter-spacing:1px;margin-bottom:6px;">AUTO-POPULATE FROM TODAY'S PARLAY ENGINE</div>
+                            <div id="comb-auto-status" style="font-size:10px;color:#4a5568;margin-bottom:7px;">Loads ELITE + STRONG picks from the daily parlay engine above.</div>
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                <button onclick="combAutoPopulate()" style="background:#667eea22;border:1px solid #667eea55;color:#667eea;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">Load Top Picks</button>
+                                <button onclick="combClear()" style="background:#ef444411;border:1px solid #ef444433;color:#ef4444;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">Clear All</button>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                            <div>
+                                <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:5px;">CORE LOCKS (in every slip)</div>
+                                <div id="comb-core-list" style="min-height:52px;background:#0a0e15;border:1px solid #2a3142;border-radius:5px;padding:6px;margin-bottom:5px;display:flex;flex-wrap:wrap;gap:4px;align-items:flex-start;"></div>
+                                <div style="display:flex;gap:5px;">
+                                    <input id="comb-core-input" type="text" placeholder="Team or player name..." style="flex:2;background:#0a0e15;border:1px solid #2a3142;color:#fff;padding:5px 8px;border-radius:4px;font-size:11px;" onkeydown="if(event.key==='Enter')combAddCore()">
+                                    <input id="comb-core-odds" type="text" placeholder="Odds e.g. -110" style="flex:1;background:#0a0e15;border:1px solid #2a3142;color:#10b981;padding:5px 8px;border-radius:4px;font-size:11px;min-width:80px;" title="American odds for this pick (e.g. -110, +150)">
+                                    <button onclick="combAddCore()" style="background:#f59e0b22;border:1px solid #f59e0b55;color:#f59e0b;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">+ Core</button>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="font-size:10px;color:#a78bfa;font-weight:700;margin-bottom:5px;">FLEX PICKS <span style="color:#4a5568;font-weight:400;">(mixed into combinations)</span></div>
+                                <div id="comb-flex-list" style="min-height:52px;background:#0a0e15;border:1px solid #2a3142;border-radius:5px;padding:6px;margin-bottom:5px;display:flex;flex-wrap:wrap;gap:4px;align-items:flex-start;"></div>
+                                <div style="display:flex;gap:5px;">
+                                    <input id="comb-flex-input" type="text" placeholder="Team or player name..." style="flex:2;background:#0a0e15;border:1px solid #2a3142;color:#fff;padding:5px 8px;border-radius:4px;font-size:11px;" onkeydown="if(event.key==='Enter')combAddFlex()">
+                                    <input id="comb-flex-odds" type="text" placeholder="Odds e.g. +120" style="flex:1;background:#0a0e15;border:1px solid #2a3142;color:#10b981;padding:5px 8px;border-radius:4px;font-size:11px;min-width:80px;" title="American odds for this pick">
+                                    <button onclick="combAddFlex()" style="background:#a78bfa22;border:1px solid #a78bfa55;color:#a78bfa;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">+ Flex</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="background:#080c12;border:1px solid #1a2535;border-radius:5px;padding:8px 12px;margin-bottom:10px;font-size:10px;color:#4a5568;">&#9888; <strong style="color:#f59e0b;">Same-game protection:</strong> opponents will never appear on the same slip. Add both sides of a matchup freely &#8212; bifurcation handles them in parallel branches.</div>
+                        <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
+                            <div>
+                                <label style="font-size:9px;color:#8b92a7;font-weight:700;display:block;margin-bottom:3px;letter-spacing:1px;">FLEX TO USE PER SLIP</label>
+                                <select id="comb-k" style="background:#0a0e15;border:1px solid #2a3142;color:#fff;padding:5px 10px;border-radius:4px;font-size:11px;">
+                                    <option value="1">1 of N</option>
+                                    <option value="2" selected>2 of N</option>
+                                    <option value="3">3 of N</option>
+                                    <option value="4">4 of N</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size:9px;color:#8b92a7;font-weight:700;display:block;margin-bottom:3px;letter-spacing:1px;">STAKE PER SLIP ($)</label>
+                                <input id="comb-stake" type="number" min="0.01" step="0.01" value="1.00" style="background:#0a0e15;border:1px solid #2a3142;color:#fff;padding:5px 10px;border-radius:4px;font-size:11px;width:90px;" title="Dollar amount you plan to stake on each individual parlay slip">
+                            </div>
+                            <button onclick="combGenerate()" style="background:linear-gradient(135deg,#667eea,#764ba2);border:none;color:#fff;padding:7px 18px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:800;">&#127922; Generate Slips</button>
+                        </div>
+                        </div>
+                        <div id="comb-ev" style="display:none;background:#080c12;border:1px solid #1a2535;border-radius:6px;padding:10px 14px;margin-bottom:12px;"></div>
+                        <div id="comb-output" style="display:none;">
+                            <div id="comb-output-title" style="font-size:11px;font-weight:700;color:#fff;margin-bottom:8px;"></div>
+                            <div id="comb-slips" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;max-height:50vh;overflow-y:auto;padding-right:4px;scrollbar-width:thin;scrollbar-color:#2a3142 #0a0e15;"></div>
+                        </div>
+                    </div>
+                    
                 </div>
             `;
             
@@ -10610,26 +10792,30 @@ function _showBracketTable() {
             var html = '';
             html += '<div style="max-width: 1100px; margin: 0 auto; padding: 20px;">';
 
-            // ── TOP ZONE: ESPN Schedule ──
-            html += '<div style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 20px; margin-bottom: 20px;">';
-            html += '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">';
-            html += '<h2 style="color: #fff; margin: 0; font-size: 17px;">' + emoji + ' Today\'s ' + label + ' Matches</h2>';
-            html += '<button onclick="fetchTapeSchedule(\'' + sport + '\')" style="padding: 6px 14px; background: #1a2535; border: 1px solid #3b82f655; border-radius: 5px; color: #3b82f6; font-size: 11px; font-weight: 700; cursor: pointer;">🔄 Refresh</button>';
-            html += '</div>';
-            html += '<div id="tape-schedule"><div style="color: #8b92a7; font-size: 13px; text-align: center; padding: 24px;">⏳ Loading today\'s schedule from ESPN...</div></div>';
-            html += '</div>';
+            // ── MATCHES ZONE: Tennis gets Kalshi live feed; MMA gets ESPN/hardcoded schedule ──
+            if (sport === 'tennis') {
+                html += '<div style="background: #0d1018; border: 1px solid #667eea44; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;">';
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
+                html += '<div>';
+                html += '<h2 style="color:#a78bfa;margin:0;font-size:15px;font-weight:800;">⚡ ' + label + ' — Live Markets</h2>';
+                html += '<div style="font-size:10px;color:#4a5568;margin-top:2px;">Powered by Kalshi proxy · live pricing</div>';
+                html += '</div>';
+                html += '<button onclick="fetchKalshiTennisMatches()" style="padding:5px 12px;background:#667eea22;border:1px solid #667eea55;border-radius:4px;color:#a78bfa;font-size:10px;font-weight:700;cursor:pointer;">🔄 Refresh</button>';
+                html += '</div>';
+                html += '<div id="kalshi-tennis-subtabs" style="display:flex;gap:6px;margin-bottom:12px;"></div>';
+                html += '<div id="kalshi-tennis-matches"><div style="color:#4a5568;font-size:12px;text-align:center;padding:20px;">⏳ Connecting to Kalshi proxy...</div></div>';
+                html += '</div>';
+            } else {
+                // MMA: tape-schedule div — fetchTapeSchedule writes UFC card here
+                html += '<div style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 20px; margin-bottom: 16px;">';
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">';
+                html += '<h2 style="color: #fff; margin: 0; font-size: 17px;">🥊 Upcoming UFC Events</h2>';
+                html += '<button onclick="fetchTapeSchedule(\'mma\')" style="padding: 6px 14px; background: #1a2535; border: 1px solid #3b82f655; border-radius: 5px; color: #3b82f6; font-size: 11px; font-weight: 700; cursor: pointer;">🔄 Refresh</button>';
+                html += '</div>';
+                html += '<div id="tape-schedule"><div style="color: #8b92a7; font-size: 13px; text-align: center; padding: 24px;">Loading fight card...</div></div>';
+                html += '</div>';
+            }
 
-            // ── KALSHI MARKETS ZONE ──
-            html += '<div style="background: #0d1018; border: 1px solid #667eea33; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">';
-            html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
-            html += '<div>';
-            html += '<h2 style="color:#a78bfa;margin:0;font-size:15px;font-weight:800;">📈 Kalshi Prediction Markets</h2>';
-            html += '<div style="font-size:10px;color:#4a5568;margin-top:2px;">Market-implied win probabilities from CFTC-regulated prediction market</div>';
-            html += '</div>';
-            html += '<button onclick="renderKalshiTapeSection(\'' + sport + '\',\'kalshi-tape-markets\')" style="padding:5px 12px;background:#667eea22;border:1px solid #667eea55;border-radius:4px;color:#a78bfa;font-size:10px;font-weight:700;cursor:pointer;">🔄 Refresh</button>';
-            html += '</div>';
-            html += '<div id="kalshi-tape-markets"><div style="color:#4a5568;font-size:11px;text-align:center;padding:8px;">Click Refresh to load Kalshi markets</div></div>';
-            html += '</div>';
 
             // ── BOTTOM ZONE: Manual Calculator ──
             html += '<div id="tape-manual-section" style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 24px; margin-bottom: 20px;">';
@@ -10703,12 +10889,211 @@ function _showBracketTable() {
             html += '<div id="tape-results"></div>';
             html += '</div>';
             content.innerHTML = html;
-            fetchTapeSchedule(sport);
+            if (sport === 'tennis') { fetchKalshiTennisMatches(); } else { fetchTapeSchedule(sport); }
             // Auto-load Kalshi markets for tennis/mma
-            setTimeout(function(){ renderKalshiTapeSection(sport, 'kalshi-tape-markets'); }, 300);
+            // Kalshi tennis auto-loaded above
         }
 
         // ── Pre-fill manual form from an ESPN card click and scroll down ──
+
+        // ── Kalshi Tennis Match Feed ──
+        var _kalshiTennisData = null;
+        var _kalshiTennisActiveTab = 'atp';
+        var _kalshiTennisTimer = null;
+
+        function fetchKalshiTennisMatches() {
+            var el = document.getElementById('kalshi-tennis-matches');
+            var tabEl = document.getElementById('kalshi-tennis-subtabs');
+            if (!el) return;
+            el.innerHTML = '<div style="color:#4a5568;font-size:12px;text-align:center;padding:20px;">⏳ Fetching matches from Kalshi...</div>';
+            fetch('http://localhost:3747/tennis-matches')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    _kalshiTennisData = data.matches || {};
+                    renderKalshiTennisTabs();
+                    // Auto-refresh prices every 60s — silently updates, no re-render of tabs
+                    if (_kalshiTennisTimer) clearInterval(_kalshiTennisTimer);
+                    _kalshiTennisTimer = setInterval(function() {
+                        fetch('http://localhost:3747/tennis-matches')
+                            .then(function(r2) { return r2.json(); })
+                            .then(function(d2) {
+                                var newData = d2.matches || {};
+                                // Only update if we got real data back
+                                if (Object.keys(newData).length > 0) {
+                                    _kalshiTennisData = newData;
+                                    renderKalshiTennisList(_kalshiTennisActiveTab);
+                                }
+                            }).catch(function(){});
+                    }, 60000);
+                })
+                .catch(function() {
+                    if (el) el.innerHTML = '<div style="color:#ef4444;font-size:12px;text-align:center;padding:20px;">' +
+                        '⚠️ Kalshi proxy not running.<br>' +
+                        '<span style="color:#4a5568;font-size:11px;">Start <b>start-kalshi.bat</b> then click Refresh</span>' +
+                        '</div>';
+                });
+        }
+
+        function renderKalshiTennisTabs() {
+            var tabEl = document.getElementById('kalshi-tennis-subtabs');
+            if (!tabEl || !_kalshiTennisData) return;
+            var TAB_LABELS = { atp:'ATP Tour', wta:'WTA Tour', challenger:'ATP Challenger', wta_challenger:'WTA Challenger' };
+            var tabs = Object.keys(_kalshiTennisData);
+            if (!tabs.length) {
+                document.getElementById('kalshi-tennis-matches').innerHTML =
+                    '<div style="color:#4a5568;font-size:12px;text-align:center;padding:20px;">No tennis markets open right now</div>';
+                return;
+            }
+            if (tabs.indexOf(_kalshiTennisActiveTab) === -1) _kalshiTennisActiveTab = tabs[0];
+            var tabHtml = '';
+            tabs.forEach(function(tab) {
+                var cnt = (_kalshiTennisData[tab] && _kalshiTennisData[tab].matches) ? _kalshiTennisData[tab].matches.length : 0;
+                var active = tab === _kalshiTennisActiveTab;
+                tabHtml += '<button onclick="_kalshiTennisActiveTab=\'' + tab + '\';renderKalshiTennisTabs();" ' +
+                    'style="padding:5px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ' +
+                    (active ? '#a78bfa;background:#a78bfa22;color:#a78bfa' : '#2a3142;background:#1a2535;color:#4a5568') + ';">' +
+                    (TAB_LABELS[tab] || tab) + ' <span style="opacity:0.7;">(' + cnt + ')</span></button>';
+            });
+            tabEl.innerHTML = tabHtml;
+            renderKalshiTennisList(_kalshiTennisActiveTab);
+        }
+
+        // Store matches by eventTicker for safe log access
+        var _kalshiMatchMap = {};
+
+        // Helper: compute V4 conviction score for a player name using full cipher engine
+        function getTennisPlayerConviction(playerName, allVW) {
+            try {
+                var identity = calculateTeamIdentity(playerName);
+                var matches = findAllCalendarMatches(identity, allVW);
+                var best = { percentage: 0, label: '', reasoning: [] };
+                Object.keys(allVW).forEach(function(calName) {
+                    var conv = calculateConviction(matches[calName], allVW);
+                    if (conv.percentage > best.percentage) best = conv;
+                });
+                return best;
+            } catch(e) { return { percentage: 0, label: '', reasoning: [] }; }
+        }
+
+        function renderKalshiTennisList(tab) {
+            var el = document.getElementById('kalshi-tennis-matches');
+            if (!el || !_kalshiTennisData) return;
+            var group = _kalshiTennisData[tab];
+            if (!group || !group.matches || !group.matches.length) {
+                el.innerHTML = '<div style="color:#4a5568;font-size:12px;text-align:center;padding:20px;">No matches in this tab</div>';
+                return;
+            }
+            var html = '';
+            group.matches.forEach(function(m) {
+                _kalshiMatchMap[m.eventTicker] = m;
+                // V4 conviction scoring via full cipher engine
+                var tDate = m.matchTime ? new Date(m.matchTime) : new Date();
+                var allVW = {};
+                try { allVW = calculateAllCalendarsVW(tDate); } catch(e) {}
+                var convA = getTennisPlayerConviction(m.playerA, allVW);
+                var convB = getTennisPlayerConviction(m.playerB, allVW);
+                var v4Winner = convA.percentage >= convB.percentage ? m.playerA : m.playerB;
+                var v4WinnerConv = convA.percentage >= convB.percentage ? convA : convB;
+                var kalshiWinner = m.aPct >= m.bPct ? m.playerA : m.playerB;
+                var agree = v4Winner === kalshiWinner;
+                // Color: green if favored by V4, gray otherwise
+                var aCol = v4Winner === m.playerA ? '#10b981' : '#6b7280';
+                var bCol = v4Winner === m.playerB ? '#10b981' : '#6b7280';
+                // Badge label from conviction
+                var BADGE_MAP = { 100:'🔑 GOLDEN KEY', 95:'🔒 STRUCTURAL LOCK', 90:'🎯 IDENTITY OVERLAP',
+                    93:'🎯 IDENTITY OVERLAP', 88:'⚡ SPEED INTERCEPT+', 85:'⚡ SPEED INTERCEPT',
+                    80:'📡 LATENT MATCH+', 78:'📡 LATENT MATCH', 75:'📡 LATENT MATCH', 70:'📊 BASELINE MATCH' };
+                var badgeLabel = v4WinnerConv.label || BADGE_MAP[v4WinnerConv.percentage] || '';
+                var badgeHtml = '';
+                if (badgeLabel) {
+                    var bColor = v4WinnerConv.percentage >= 95 ? '#f59e0b' :
+                                 v4WinnerConv.percentage >= 85 ? '#a78bfa' : '#3b82f6';
+                    badgeHtml = '<div style="text-align:center;margin-bottom:8px;">' +
+                        '<span style="background:' + bColor + '22;color:' + bColor +
+                        ';border:1px solid ' + bColor + '55;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:800;">' +
+                        badgeLabel + '</span></div>';
+                }
+                // Status badge
+                var statusBadge = '';
+                if (m.isLive) {
+                    statusBadge = '<span style="background:#ef444422;color:#ef4444;border:1px solid #ef444455;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:700;">🔴 LIVE</span>';
+                } else if (m.matchTime) {
+                    var mTime = new Date(m.matchTime);
+                    var today = new Date();
+                    var isToday = mTime.toDateString() === today.toDateString();
+                    var isTomorrow = mTime.toDateString() === new Date(today.getTime()+86400000).toDateString();
+                    var dayLabel = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : mTime.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+                    var timeStr = mTime.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+                    statusBadge = '<span style="color:#9ca3af;font-size:11px;font-weight:600;">🕐 ' + dayLabel + ' · ' + timeStr + '</span>';
+                }
+                var tickerSafe = m.eventTicker.replace(/'/g,'');
+                html += '<div style="background:#111827;border:1px solid ' + (agree ? '#10b98133' : '#1f2937') + ';border-radius:8px;padding:14px 16px;margin-bottom:10px;">';
+                // Header row
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
+                html += '<div style="display:flex;align-items:center;gap:8px;">' + statusBadge + '<span style="font-size:11px;color:#4a5568;">' + m.tournament + '</span></div>';
+                if (agree) html += '<span style="background:#10b98122;color:#10b981;border:1px solid #10b98144;border-radius:3px;padding:1px 6px;font-size:9px;font-weight:800;">⚡ V4+KALSHI AGREE</span>';
+                html += '</div>';
+                // V4 badge
+                html += badgeHtml;
+                // Players row — centered, larger
+                html += '<div style="display:flex;align-items:flex-start;justify-content:center;gap:12px;margin-bottom:10px;">';
+                // Player A
+                html += '<div style="flex:1;text-align:center;">';
+                html += '<div style="font-size:15px;font-weight:800;color:' + aCol + ';">' + m.playerA + '</div>';
+                html += '<div style="font-size:13px;color:#9ca3af;margin-top:3px;">Kalshi <b style="color:' + (m.aPct >= m.bPct ? '#10b981' : '#6b7280') + ';font-size:15px;">' + m.aPct + '%</b></div>';
+                html += '<div style="font-size:11px;color:#4a5568;margin-top:2px;">V4: <b style="color:#e8e8e8;">' + convA.percentage + '%</b>';
+                if (convA.label) html += ' <span style="color:#a78bfa;">' + convA.label + '</span>';
+                html += '</div></div>';
+                // VS
+                html += '<div style="color:#374151;font-weight:900;font-size:13px;padding-top:6px;">vs</div>';
+                // Player B
+                html += '<div style="flex:1;text-align:center;">';
+                html += '<div style="font-size:15px;font-weight:800;color:' + bCol + ';">' + m.playerB + '</div>';
+                html += '<div style="font-size:13px;color:#9ca3af;margin-top:3px;">Kalshi <b style="color:' + (m.bPct > m.aPct ? '#10b981' : '#6b7280') + ';font-size:15px;">' + m.bPct + '%</b></div>';
+                html += '<div style="font-size:11px;color:#4a5568;margin-top:2px;">V4: <b style="color:#e8e8e8;">' + convB.percentage + '%</b>';
+                if (convB.label) html += ' <span style="color:#a78bfa;">' + convB.label + '</span>';
+                html += '</div></div>';
+                html += '</div>';
+                // Log button
+                html += '<div style="text-align:center;">';
+                html += '<button onclick="logKalshiTennisPick(\'' + tickerSafe + '\')" ' +
+                    'style="padding:4px 16px;background:#fbbf2422;border:1px solid #fbbf2455;border-radius:4px;color:#fbbf24;font-size:10px;font-weight:700;cursor:pointer;">📋 Log to Accuracy Tracker</button>';
+                html += '</div></div>';
+            });
+            el.innerHTML = html;
+        }
+
+        function logKalshiTennisPick(eventTicker) {
+            var match = _kalshiMatchMap[eventTicker];
+            if (!match) { alert('Match data not found — click Refresh first.'); return; }
+            try {
+                var tDate = match.matchTime ? new Date(match.matchTime) : new Date();
+                var allVW = calculateAllCalendarsVW(tDate);
+                var convA = getTennisPlayerConviction(match.playerA, allVW);
+                var convB = getTennisPlayerConviction(match.playerB, allVW);
+                var v4Winner = convA.percentage >= convB.percentage ? match.playerA : match.playerB;
+                var v4WinnerConv = convA.percentage >= convB.percentage ? convA : convB;
+                var kalshiWinner = match.aPct >= match.bPct ? match.playerA : match.playerB;
+                accuracyTracker.predictions.set(match.eventTicker, {
+                    gameId: match.eventTicker, sport: 'tennis',
+                    homeTeam: match.playerA, awayTeam: match.playerB,
+                    homeWP: match.aPct / 100, predictedHomeWP: match.aPct / 100,
+                    kalshiTicker: match.eventTicker,
+                    kalshiTickerA: match.tickerA, kalshiTickerB: match.tickerB,
+                    tournament: match.tournament,
+                    v4Winner: v4Winner, v4WinnerConviction: v4WinnerConv.percentage,
+                    v4WinnerBadge: v4WinnerConv.label, kalshiWinner: kalshiWinner,
+                    convictionA: convA.percentage, convictionB: convB.percentage,
+                    timestamp: Date.now(), gameDate: tDate.toISOString(),
+                    gameTime: tDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}), status: 'PENDING'
+                });
+                accuracyTracker.saveToStorage();
+                alert('✅ Logged: ' + match.playerA + ' vs ' + match.playerB + '\n' +
+                      'V4 pick: ' + v4Winner + ' (' + v4WinnerConv.percentage + '%' + (v4WinnerConv.label ? ' · ' + v4WinnerConv.label : '') + ')\n' +
+                      'Kalshi: ' + kalshiWinner + ' (' + Math.max(match.aPct, match.bPct) + '%)');
+            } catch(e) { alert('Error logging: ' + e.message); }
+        }
+
         function fillTapeFromESPN(nameA, nameB) {
             var ia = document.getElementById('tape-name-a');
             var ib = document.getElementById('tape-name-b');
@@ -12527,7 +12912,10 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             var grandB = grandByType(scoreB);
 
             // ── Composite scoring — winner by all signals, not just VW tape ──
-            var _DNS_MT = [7,1,3], _DNL_MT = [4,5];
+                var _obsRoots_mt = (typeof getObservedDailyRoots==='function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+                var _DNS_MT = _obsRoots_mt.targets.length ? _obsRoots_mt.targets : [7,1,3];
+                var _DNL_MT = _obsRoots_mt.losers.length  ? _obsRoots_mt.losers  : [4,5];
+                var _dnaSource_mt = _obsRoots_mt.source || 'default';
             function _mr_mt(name){ try{ var p=name.trim().split(/\s+/),m=p[p.length-1],s=0; m.toUpperCase().replace(/[^A-Z]/g,'').split('').forEach(function(c){s+=c.charCodeAt(0)-64;}); while(s>9)s=String(s).split('').reduce(function(a,d){return a+parseInt(d);},0); return s; }catch(e){return null;} }
             function _varDNA_mt(name){ var parts=name.trim().split(/\s+/),vars={full:name,city:parts.length>1?parts.slice(0,-1).join(' '):name,mascot:parts[parts.length-1],abbrev:parts.map(function(p){return p[0]||'';}).join('').toUpperCase()},score=0; Object.keys(vars).forEach(function(vk){ var rc={}; Object.keys(CIPHERS).forEach(function(ck){ var r=calculateDigitalRoot(CIPHERS[ck](vars[vk])).root; rc[r]=(rc[r]||0)+1; }); var dom=Object.keys(rc).map(Number).sort(function(a,b){return rc[b]-rc[a];})[0]; if(_DNS_MT.indexOf(dom)!==-1)score++; }); return score; }
             var _mrA=_mr_mt(pA.name),_mrB=_mr_mt(pB.name);
@@ -12570,14 +12958,19 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 mergedWinner = tapeWinnerName; mergedRule = 'R_INCONSISTENT'; mergedRuleTag = '〰️ A inconsistent→B';
             } else if (modesAgree) {
                 mergedWinner = tapeWinnerName; mergedRule = 'AGREE'; mergedRuleTag = null;
+            } else if (modeAConvPct >= 85) {
+                // Rule 1 (updated): High conviction + disagree → trust Mode B tape score
+                // 163-game data: B wins 62% vs A 38% when A>=85% and modes split
+                mergedWinner = tapeWinnerName; mergedRule = 'R1:B_CONV'; mergedRuleTag = '🔬 HighConv→B';
             } else if (margin >= 100) {
-                mergedWinner = tapeWinnerName; mergedRule = 'R1:A'; mergedRuleTag = '📐 Margin≥100→A';
+                // Rule 2: Large margin, low conviction → slight A edge (58% vs 42%)
+                mergedWinner = modeAWinnerName; mergedRule = 'R2:A'; mergedRuleTag = '📐 Margin≥100→A';
             } else if (margin < 30) {
-                mergedWinner = modeAWinnerName; mergedRule = 'R2:B'; mergedRuleTag = '〰️ Margin<30→B';
-            } else if (modeAConvPct >= 96) {
-                mergedWinner = modeAWinnerName; mergedRule = 'R4:B'; mergedRuleTag = '⚡ Conv96+→B';
+                // Rule 3: Small margin → Mode B (68% vs 32%)
+                mergedWinner = tapeWinnerName; mergedRule = 'R3:B'; mergedRuleTag = '〰️ Margin<30→B';
             } else {
-                mergedWinner = tapeWinnerName; mergedRule = 'R3:A'; mergedRuleTag = '📊 Med→A';
+                // Rule 4: Medium margin, low conviction → Mode B default (B 56% in both sub-ranges)
+                mergedWinner = tapeWinnerName; mergedRule = 'R4:B_MED'; mergedRuleTag = '📊 Med→B';
             }
             // Use merged winner as final V4 pick
             var finalV4Winner = mergedWinner || tapeWinnerName;
@@ -12689,6 +13082,16 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 out += '<div style="color: ' + bannerColor + '99; font-size: 11px; margin-top: 2px;cursor:help;" title="Composite Score: VW tape base + DNA name variation hits (×25 pts each, max 100) + mascot root bonus (+50 if target root, -35 if loser root) + Mode A conviction boost (+10 to +60 depending on conviction %) + Life Path boost (×6) + DNA sequence pick bonus (+20). This is the true predicted winner determination.">Composite Score: ' +
                        Math.round(_compA) + ' vs ' + Math.round(_compB) +
                        ' (composite margin: +' + margin + ' pts)</div>';
+            } else {
+                // TIE: still show raw scores so user can see the comparison
+                var _vwMarginTie = Math.abs(scoreA.totalWeighted - scoreB.totalWeighted);
+                out += '<div style="color:#8b92a7;font-size:13px;margin-top:4px;">' +
+                    pA.name + ': <b>' + scoreA.totalWeighted + '</b> vs ' +
+                    pB.name + ': <b>' + scoreB.totalWeighted + '</b>' +
+                    ' (VW margin: ' + _vwMarginTie + ' pts)</div>';
+                out += '<div style="color:#6b7280;font-size:11px;margin-top:2px;">' +
+                    'Composite: ' + Math.round(_compA) + ' vs ' + Math.round(_compB) +
+                    ' — margin too small to call</div>';
             }
             out += '<div style="display: flex; justify-content: center; gap: 24px; margin-top: 12px; flex-wrap: wrap;">';
             out += '<span style="color: #8b92a7; font-size: 11px;cursor:help;" title="Cipher Score: Number of raw cipher matches across all 12 gematria ciphers and 4 name variations (48 total per player) that align with todays VW metrics. Unweighted count — before DPM×5, UN×4, GD×3, LD×2 weights are applied.">Cipher Score: 🔵 ' + scoreA.cipherScore + ' vs 🔴 ' + scoreB.cipherScore + '</span>';
@@ -12702,7 +13105,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     var aColor = modeAConvPct >= 85 ? '#10b981' : modeAConvPct >= 70 ? '#3b82f6' : '#a78bfa';
                     out += '<div style="margin-top:10px;padding:8px 12px;background:#0d1a0d;border:1px solid #10b98144;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
                     out += '<span style="font-size:10px;font-weight:800;color:#10b981;cursor:help;" title="MODE A CONFIRMS: The cipher conviction engine (Mode A) ran 12 gematria ciphers × 4 name variations × 9 calendar systems and independently picked the same winner as the VW Tape (Mode B). Two completely different methodologies agreeing is a strong signal.">✅ MODE A CONFIRMS</span>';
-                    out += '<span style="font-size:11px;color:#fff;font-weight:700;">' + modeAWinnerName + '</span>';
+                    out += '<span style="font-size:11px;color:#fff;font-weight:700;">' + (modeAWinnerName||'INCONSISTENT') + '</span>';
                     out += '<span style="font-size:10px;color:' + aColor + ';font-weight:700;background:#0a0e1a;border:1px solid ' + aColor + '44;border-radius:3px;padding:1px 6px;">' + modeAConvPct + '% — ' + modeAConvLabel + '</span>';
                     out += '<span style="font-size:10px;color:#4a5568;">via ' + modeACalendar.replace(/_/g,' ').toUpperCase() + '</span>';
                     out += '</div>';
@@ -12710,7 +13113,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     out += '<div style="margin-top:10px;padding:8px 12px;background:#1a1200;border:1px solid #f59e0b44;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
                     out += '<span style="font-size:10px;font-weight:800;color:#f59e0b;cursor:help;" title="MODE A DISSENTS: The cipher conviction engine (Mode A) picked a DIFFERENT winner than the VW Tape (Mode B). These two engines use fundamentally different approaches — tape uses raw vibrational scores, Mode A uses cipher lock patterns. When they disagree, the merged winner is selected based on the margin and conviction rules shown in the signal panel.">⚠️ MODE A DISSENTS</span>';
                     out += '<span style="font-size:10px;color:#8b92a7;">Conviction engine picks</span>';
-                    out += '<span style="font-size:11px;color:#f59e0b;font-weight:700;">' + modeAWinnerName + '</span>';
+                    out += '<span style="font-size:11px;color:#f59e0b;font-weight:700;">' + (modeAWinnerName||'INCONSISTENT') + '</span>';
                     out += '<span style="font-size:10px;color:#f59e0b;background:#0a0e1a;border:1px solid #f59e0b44;border-radius:3px;padding:1px 6px;">' + modeAConvPct + '% — ' + modeAConvLabel + '</span>';
                     out += '<span style="font-size:10px;color:#4a5568;">via ' + modeACalendar.replace(/_/g,' ').toUpperCase() + '</span>';
                     out += '</div>';
@@ -12736,11 +13139,15 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             // Merge rule tag
             if (mergedRuleTag) {
                 var ENGINE_RULE_TIPS_T = {
-                    'R_INCONSISTENT': 'Mode A produced different winners depending on player order — signal discarded. Mode B (VW Tape) leads.',
-                    'R1:A': 'Tape margin 100+ pts — Mode A historically outperforms at this separation.',
-                    'R2:B': 'Tape margin <30 pts — too close for Mode A. Mode B leads.',
-                    'R4:B': 'Mode A at 96%+ conviction — Mode B historically more accurate in these cases.',
-                    'R3:A': 'Medium margin, Mode A default (50% historical vs 46% Mode B).'
+                    'R_INCONSISTENT': 'MODE A INCONSISTENT: Mode A produced different winners depending on which team was listed first. Signal discarded — Mode B (VW Tape Scorer) leads since it is order-independent.',
+                    'R1:B_CONV': 'RULE 1 (163-game audit): HIGH CONVICTION + DISAGREE → MODE B. When Mode A fires at 85%+ conviction but disagrees with Mode B, Mode B wins 62% vs Mode A 38%. Strong cipher conviction when the tape disagrees is actually a contrarian signal — trust the tape.',
+                    'R2:A': 'RULE 2: LARGE MARGIN (100+ pts), LOW CONVICTION → MODE A. Weak A edge (58% vs 42%). Only applies when conviction rule did not fire first.',
+                    'R3:B': 'RULE 3: SMALL MARGIN (<30 pts) → MODE B. Mode B wins 68% vs Mode A 32% on close-score disagreements. When tape scores are nearly equal, Mode A conviction is unreliable.',
+                    'R4:B_MED': 'RULE 4: MEDIUM MARGIN (30-99 pts), LOW CONVICTION → MODE B. Updated from 163-game audit. Mode B wins 56% in both the 20-50 and 51-100 margin ranges. Previous default was Mode A — corrected.',
+                    'R1:A': 'RULE (legacy): LARGE MARGIN → MODE A. Superseded by 163-game audit rules.',
+                    'R2:B': 'RULE (legacy): SMALL MARGIN → MODE B.',
+                    'R4:B': 'RULE (legacy): EXTREME CONVICTION → MODE B.',
+                    'R3:A': 'RULE (legacy): MEDIUM MARGIN DEFAULT → MODE A. Superseded — now defaults to Mode B.'
                 };
                 var rtip = (ENGINE_RULE_TIPS_T[mergedRule]||'').replace(/"/g,'&quot;');
                 out += '<span class="chronos-tip" data-tip="' + rtip + '" style="background:#0a0e1a;border:1px solid #667eea33;color:#667eea;font-size:9px;padding:1px 6px;border-radius:3px;cursor:help;">' + mergedRuleTag + '</span>';
@@ -12872,13 +13279,18 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 {val:'nhl',  label:'🏒 NHL'},
                 {val:'mlb',  label:'⚾ MLB'},
                 {val:'soccer',label:'⚽ Soccer'},
-                {val:'tennis',label:'🎾 Tennis'},
+                {val:'tennis',label:'🎾 Tennis (all)'},
+            {val:'tennis-atp',label:'🎾 Tennis - ATP'},
+            {val:'tennis-wta',label:'🎾 Tennis - WTA'},
                 {val:'mma',  label:'🥊 MMA'},
                 {val:'lacrosse', label:'🥍 Lacrosse'},
                 {val:'cricket',  label:'🏏 Cricket'},
                 {val:'boxing',   label:'🥊 Boxing'},
                 {val:'esports',  label:'🎮 E-Sports'},
-                {val:'rugby',    label:'🏉 Rugby'}
+                {val:'rugby',    label:'🏉 Rugby'},
+            {val:'cba',      label:'🏀 CBA (Chinese Basketball)'},
+            {val:'euroleague',label:'🏀 Euroleague Basketball'},
+            {val:'soccer_friendly', label:'⚽ Soccer — Intl Friendlies'}
             ];
             out += '<select id="tape-sport-select" style="background:#1a2535;color:#fff;border:1px solid #2a3142;border-radius:4px;padding:4px 8px;font-size:11px;cursor:pointer;">';
             sportOptions.forEach(function(opt) {
@@ -12949,6 +13361,20 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             out += '<div style="background: #1a1f2e; border: 1px solid #2a3142; border-radius: 8px; padding: 20px; margin-bottom: 20px;">';
             out += '<h3 style="color: #fff; margin: 0 0 14px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;cursor:help;" title="Calendar-by-Calendar Breakdown: Shows each players VW metric scores (UN/GD/LD/DPM) separately for each of the 9 calendar systems used by Chronos V4. Calendars: Gregorian (standard), Ancient Roman, UNC (Universal Number Calendar), IFC (International Fixed), Ethiopian, Pure SOL, SOL (most predictive historically), Future Gregorian +2, Gemini Rolling. SOL, Ethiopian, and G-Roll are the 3 strongest-performing calendars.">📅 Calendar-by-Calendar Breakdown</h3>';
 
+                // ── VW target roots compact display (tooltip on each pill) ──
+                out += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
+                (function(){
+                    var _CAL_SHORT={gregorian:'Greg',ancient_roman:'AncR',unc:'UNC',ifc:'IFC',ethiopian:'Eth',pure_sol:'PSOL',sol:'SOL',future_gregorian_plus2:'FutG',gemini_rolling:'G-Roll'};
+                    function _dr9(n){if(!n&&n!==0)return'?';var x=parseInt(n)||0;while(x>9&&x!==11&&x!==22&&x!==33){x=String(x).split('').reduce(function(a,b){return a+parseInt(b);},0);}return x;}
+                    calKeys.forEach(function(ck){
+                        var vw=allVW[ck]; if(!vw)return;
+                        out+='<span style="font-size:9px;background:#0a0e15;border:1px solid #1a2535;border-radius:3px;padding:2px 5px;color:#6b7280;white-space:nowrap;">'+(_CAL_SHORT[ck]||ck)+' '
+                            +'<span style="color:#3b82f6;">'+_dr9(vw.un)+'</span>·<span style="color:#10b981;">'+_dr9(vw.gd)+'</span>·<span style="color:#8b5cf6;">'+_dr9(vw.ld)+'</span>·<span style="color:#f59e0b;">'+_dr9(vw.dpm)+'</span></span>';
+                    });
+                })();
+                out += '</div>';
+                out += '<div style="font-size:8px;color:#4a5568;margin-bottom:6px;">↑ VW root targets per calendar (UN·GD·LD·DPM) — table below counts how many of 48 cipher combos matched each target</div>';
+
             // Column headers
             out += '<div style="display: grid; grid-template-columns: 95px repeat(4, 1fr) 60px repeat(4, 1fr) 60px; gap: 3px; padding: 4px 6px; border-bottom: 1px solid #1a2030; margin-bottom: 4px;">';
             out += '<span style="color: #4a5568; font-size: 9px; text-transform: uppercase;">Calendar</span>';
@@ -12961,6 +13387,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             });
             out += '<div style="text-align: center; color: ' + pBColor + '; font-size: 9px; font-weight: 700;cursor:help;" title="Weighted total for ' + pB.name + ' on this calendar. Formula: (UN×4)+(GD×3)+(LD×2)+(DPM×5). Higher = stronger alignment.">Wtd<div style="color: #3a4155; font-size: 8px; font-weight: 400;">' + pB.name.split(' ').pop() + '</div></div>';
             out += '</div>';
+
 
             calKeys.forEach(function(calName) {
                 var cA = scoreA.calStats[calName];
@@ -13136,7 +13563,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 var scoreColor = hitCount >= 3 ? '#10b981' : hitCount >= 2 ? '#3b82f6' : hitCount >= 1 ? '#f59e0b' : '#ef4444';
                 s += '<div style="margin-top:8px;padding-top:6px;border-top:1px solid #1a2030;display:flex;justify-content:space-between;align-items:center;">';
                 s += '<span style="font-size:10px;color:#4a5568;">DNA pattern match</span>';
-                s += '<span style="font-size:12px;font-weight:800;color:' + scoreColor + ';">' + hitCount + '/' + totalVars + ' variations hit Root 7/1/3</span>';
+                s += '<span style="font-size:12px;font-weight:800;color:' + scoreColor + ';">' + hitCount + '/' + totalVars + ' variations hit Root ' + (function(){ try { var _o=getObservedDailyRoots(); return 'R'+(_o.targets||[7,1,3]).join('/R'); } catch(e){ return 'R7/R1/R3'; }})() + '</span>';
                 s += '</div>';
 
                 // Today's VW context
@@ -13655,6 +14082,368 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
         }
         
         // Daily Parlay generator
+
+        // ── Parlay Combinator Logic ──
+        // ── Parlay Combinator v2 — same-game guards + money calculator ──
+        var _combCore = [];  // {name, odds, opponent}
+        var _combFlex = [];  // {name, odds, opponent}
+
+        // Convert American odds string to decimal multiplier
+        function _oddsToDecimal(american) {
+            var n = parseFloat(String(american).replace(/[^0-9.\-+]/g,''));
+            if (isNaN(n) || n === 0) return 1.91; // default ~-110
+            if (n > 0) return (n / 100) + 1;
+            return (100 / Math.abs(n)) + 1;
+        }
+        // Convert American odds to implied win probability
+        function _oddsToImplied(american) {
+            var n = parseFloat(String(american).replace(/[^0-9.\-+]/g,''));
+            if (isNaN(n) || n === 0) return 0.52;
+            if (n > 0) return 100 / (n + 100);
+            return Math.abs(n) / (Math.abs(n) + 100);
+        }
+        // Format payout to dollar string
+        function _fmt(n) { return '$' + n.toFixed(2); }
+
+        // Detect same-game conflict: returns conflicting team name or null
+        function _sgpConflict(newName, existingList) {
+            var newKey = newName.toLowerCase().replace(/\s+/g,'');
+            for (var gi = 0; gi < existingList.length; gi++) {
+                var ex = existingList[gi];
+                var existKey = ex.name.toLowerCase().replace(/\s+/g,'');
+                var conflict = false;
+                // Check 1: stored opponent field on existing pick
+                if (ex.opponent) {
+                    var oppKey = ex.opponent.toLowerCase().replace(/\s+/g,'');
+                    if (oppKey.length > 2 && (newKey.indexOf(oppKey)!==-1 || oppKey.indexOf(newKey)!==-1)) conflict = true;
+                }
+                // Check 2: stored homeTeam/awayTeam on existing pick — most reliable for parlay engine picks
+                if (!conflict && ex.homeTeam && ex.awayTeam) {
+                    var htKey = ex.homeTeam.toLowerCase().replace(/\s+/g,'');
+                    var atKey = ex.awayTeam.toLowerCase().replace(/\s+/g,'');
+                    // newName matches one side, existKey matches other side = same game
+                    var newMatchH = newKey.indexOf(htKey)!==-1 || htKey.indexOf(newKey)!==-1;
+                    var newMatchA = newKey.indexOf(atKey)!==-1 || atKey.indexOf(newKey)!==-1;
+                    var exMatchH  = existKey.indexOf(htKey)!==-1 || htKey.indexOf(existKey)!==-1;
+                    var exMatchA  = existKey.indexOf(atKey)!==-1 || atKey.indexOf(existKey)!==-1;
+                    if ((newMatchH && exMatchA) || (newMatchA && exMatchH)) conflict = true;
+                }
+                // Check 3: gameWPs fallback (works when sport tab is active)
+                if (!conflict && typeof gameWPs !== 'undefined') {
+                    gameWPs.forEach(function(gd) {
+                        if (!gd.data || conflict) return;
+                        var h = (gd.data.homeTeam||'').toLowerCase().replace(/\s+/g,'');
+                        var a = (gd.data.awayTeam||'').toLowerCase().replace(/\s+/g,'');
+                        var nH = h.indexOf(newKey)!==-1 || newKey.indexOf(h.split(' ').pop())!==-1;
+                        var nA = a.indexOf(newKey)!==-1 || newKey.indexOf(a.split(' ').pop())!==-1;
+                        var eH = h.indexOf(existKey)!==-1 || existKey.indexOf(h.split(' ').pop())!==-1;
+                        var eA = a.indexOf(existKey)!==-1 || existKey.indexOf(a.split(' ').pop())!==-1;
+                        if ((nH && eA) || (nA && eH)) conflict = true;
+                    });
+                }
+                if (conflict) return ex.name;
+            }
+            return null;
+        }
+
+        // Find opponent of a team from gameWPs
+        function _findOpponent(teamName) {
+            var key = teamName.toLowerCase().replace(/\s+/g,'');
+            var opp = null;
+            if (typeof gameWPs !== 'undefined') {
+                gameWPs.forEach(function(gd) {
+                    if (!gd.data || opp) return;
+                    var h = (gd.data.homeTeam||'').toLowerCase().replace(/\s+/g,'');
+                    var a = (gd.data.awayTeam||'').toLowerCase().replace(/\s+/g,'');
+                    var hm = h.indexOf(key)!==-1 || key.indexOf(h.split(' ').pop())!==-1;
+                    var am = a.indexOf(key)!==-1 || key.indexOf(a.split(' ').pop())!==-1;
+                    if (hm) opp = gd.data.awayTeam;
+                    else if (am) opp = gd.data.homeTeam;
+                });
+            }
+            return opp;
+        }
+
+        function combRenderList(id, arr, color) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            if (!arr.length) { el.innerHTML = '<span style="font-size:10px;color:#2a3142;">Add teams below...</span>'; return; }
+            el.innerHTML = arr.map(function(item, i) {
+                var t = item.name, odds = item.odds||'', opp = item.opponent||'';
+                var oppHtml = opp ? '<span style="font-size:9px;color:#4a5568;"> vs '+opp+'</span>' : '';
+                var oddsHtml = odds ? '<span style="font-size:9px;color:#10b981;margin-left:3px;">'+odds+'</span>' : '';
+                return '<span style="display:inline-flex;align-items:center;gap:3px;background:'+color+'22;border:1px solid '+color+'55;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:600;color:'+color+';">'
+                    + t + oddsHtml + oppHtml
+                    + '<span onclick="combRemove(\''+id+'\','+i+')" style="cursor:pointer;color:'+color+';font-size:12px;margin-left:2px;">×</span></span>';
+            }).join('');
+        }
+        function combRemove(listId, idx) {
+            if (listId === 'comb-core-list') { _combCore.splice(idx,1); combRenderList('comb-core-list', _combCore, '#f59e0b'); }
+            else { _combFlex.splice(idx,1); combRenderList('comb-flex-list', _combFlex, '#a78bfa'); }
+        }
+        function _combPushItem(list, listId, color, name, odds) {
+            var conflict = _sgpConflict(name, list.concat(list === _combCore ? _combFlex : _combCore));
+            if (conflict) {
+                var opp = _findOpponent(name) || conflict;
+                // Don't block — split them into bifurcation branches instead, just warn
+                var statusEl = document.getElementById('comb-auto-status');
+                if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b;font-weight:700;">&#9888; Same-game detected:</span> <span style="color:#8b92a7;">'+name+' vs '+opp+' — these opponents will never appear on the same slip. Both sides kept for bifurcation.</span>';
+            }
+            var opp = _findOpponent(name);
+            list.push({ name: name, odds: odds||'', opponent: opp||'' });
+            combRenderList(listId, list, color);
+        }
+        function combAddCore() {
+            var inp = document.getElementById('comb-core-input');
+            var oddsInp = document.getElementById('comb-core-odds');
+            var val = (inp.value||'').trim();
+            if (!val) return;
+            if (_combCore.some(function(x){return x.name===val;})) { inp.value=''; return; }
+            _combPushItem(_combCore, 'comb-core-list', '#f59e0b', val, oddsInp ? oddsInp.value.trim() : '');
+            inp.value = ''; if (oddsInp) oddsInp.value = '';
+        }
+        function combAddFlex() {
+            var inp = document.getElementById('comb-flex-input');
+            var oddsInp = document.getElementById('comb-flex-odds');
+            var val = (inp.value||'').trim();
+            if (!val) return;
+            if (_combFlex.some(function(x){return x.name===val;})) { inp.value=''; return; }
+            _combPushItem(_combFlex, 'comb-flex-list', '#a78bfa', val, oddsInp ? oddsInp.value.trim() : '');
+            inp.value = ''; if (oddsInp) oddsInp.value = '';
+        }
+        function combClear() {
+            _combCore = []; _combFlex = [];
+            combRenderList('comb-core-list', _combCore, '#f59e0b');
+            combRenderList('comb-flex-list', _combFlex, '#a78bfa');
+            var out = document.getElementById('comb-output');
+            var ev  = document.getElementById('comb-ev');
+            if (out) out.style.display = 'none';
+            if (ev)  ev.style.display  = 'none';
+        }
+        function combAutoPopulate() {
+            var statusEl = document.getElementById('comb-auto-status');
+            if (!window._parlayGenerated) {
+                if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b;font-weight:700;">&#9888; Parlay engine hasn\'t run yet.</span> <span style="color:#8b92a7;">Switch sport tabs and return to trigger it.</span>';
+                return;
+            }
+            _combCore = []; _combFlex = [];
+            var added = 0;
+            try {
+                var allPools = [
+                    window._parlayTodayQuad, window._parlayTodayAV2VG,
+                    window._parlayQuadLocks, window._parlayAV2VG, window._parlayBV2VG,
+                    window._parlayABV2, window._parlayABVG, window._parlayAB
+                ];
+                var seen = {};
+                allPools.forEach(function(pool) {
+                    (pool||[]).forEach(function(p) {
+                        if (!p || !p.winner) return;
+                        var key = p.winner.toLowerCase();
+                        if (seen[key]) return;
+                        seen[key] = true;
+                        var tier = p.pickTier || 'STANDARD';
+                        if (tier === 'EXCLUDE') return;
+                        var name = p.winner;
+                        // Use parlay engine's stored opponent directly — reliable regardless of gameWPs state
+                        var opp = p.loser || p.awayTeam || p.homeTeam || _findOpponent(name) || '';
+                        // If this pick IS the away team, opponent is home team and vice versa
+                        if (p.homeTeam && p.awayTeam) {
+                            opp = (name === p.homeTeam || name.indexOf(p.homeTeam.split(' ').pop())!==-1) ? p.awayTeam : p.homeTeam;
+                        }
+                        var item = { name: name, odds: '', opponent: opp, homeTeam: p.homeTeam||'', awayTeam: p.awayTeam||'' };
+                        if (tier === 'ELITE' && _combCore.length < 4 && !_combCore.some(function(x){return x.name===name;})) {
+                            _combCore.push(item); added++;
+                        } else if ((tier==='STRONG'||tier==='STANDARD') && _combFlex.length < 6 && !_combFlex.some(function(x){return x.name===name;})) {
+                            _combFlex.push(item); added++;
+                        } else if (tier==='HIGH_RISK' && _combFlex.length < 6 && !_combFlex.some(function(x){return x.name===name;})) {
+                            _combFlex.push({ name: name+' [HR]', odds: '', opponent: opp }); added++;
+                        }
+                    });
+                });
+                if (!added && window._parlayAllPredictions && window._parlayAllPredictions.length) {
+                    var sorted = window._parlayAllPredictions.slice().sort(function(a,b){ return b.winnerConviction.percentage - a.winnerConviction.percentage; });
+                    sorted.slice(0,3).forEach(function(p){ _combCore.push({name:p.winner,odds:'',opponent:_findOpponent(p.winner)||''}); added++; });
+                    sorted.slice(3,7).forEach(function(p){ _combFlex.push({name:p.winner,odds:'',opponent:_findOpponent(p.winner)||''}); added++; });
+                }
+            } catch(e) {
+                if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444;">Error: '+e.message+'</span>';
+            }
+            combRenderList('comb-core-list', _combCore, '#f59e0b');
+            combRenderList('comb-flex-list', _combFlex, '#a78bfa');
+            if (statusEl) {
+                if (added > 0) statusEl.innerHTML = '<span style="color:#10b981;font-weight:700;">&#10003; Loaded '+added+' picks</span> <span style="color:#4a5568;">('+_combCore.length+' core, '+_combFlex.length+' flex) — add American odds then generate.</span>';
+                else statusEl.innerHTML = '<span style="color:#f59e0b;">No qualifying picks today.</span> <span style="color:#4a5568;">Add teams manually.</span>';
+            }
+        }
+        function _combinations(arr, k) {
+            if (k === 0) return [[]];
+            if (arr.length < k) return [];
+            var result = [];
+            var rest = _combinations(arr.slice(1), k-1);
+            rest.forEach(function(c){ result.push([arr[0]].concat(c)); });
+            return result.concat(_combinations(arr.slice(1), k));
+        }
+        function combGenerate() {
+            if (!_combCore.length && !_combFlex.length) { alert('Add at least one pick first.'); return; }
+            var k = parseInt(document.getElementById('comb-k').value) || 2;
+            var stakePerSlip = parseFloat(document.getElementById('comb-stake').value) || 1;
+
+            // Build flex combinations — filter out same-game conflicts within each combo
+            var flexItems = _combFlex.slice();
+            var flexCombos = flexItems.length > 0 ? _combinations(flexItems, Math.min(k, flexItems.length)) : [[]];
+
+            // Filter out any combo that contains two opponents of the same game
+            flexCombos = flexCombos.filter(function(combo) {
+                for (var i = 0; i < combo.length; i++) {
+                    for (var j = i+1; j < combo.length; j++) {
+                        var ai = combo[i].name.toLowerCase().replace(/\s+/g,'');
+                        var aj = combo[j].name.toLowerCase().replace(/\s+/g,'');
+                        // Check via stored opponent field
+                        var oi = (combo[i].opponent||'').toLowerCase().replace(/\s+/g,'');
+                        var oj = (combo[j].opponent||'').toLowerCase().replace(/\s+/g,'');
+                        if (oi && aj.length > 2 && (aj.indexOf(oi)!==-1 || oi.indexOf(aj)!==-1)) return false;
+                        if (oj && ai.length > 2 && (ai.indexOf(oj)!==-1 || oj.indexOf(ai)!==-1)) return false;
+                        // Cross-check: does pick i's name match pick j's stored homeTeam or awayTeam?
+                        var iHT = (combo[i].homeTeam||'').toLowerCase().replace(/\s+/g,'');
+                        var iAT = (combo[i].awayTeam||'').toLowerCase().replace(/\s+/g,'');
+                        var jHT = (combo[j].homeTeam||'').toLowerCase().replace(/\s+/g,'');
+                        var jAT = (combo[j].awayTeam||'').toLowerCase().replace(/\s+/g,'');
+                        // Same game: i is home, j is away (or vice versa) of same matchup
+                        if (iHT && iAT && jHT && jAT) {
+                            if ((iHT===jAT && iAT===jHT)||(iHT===jHT && iAT===jAT)) return false;
+                        }
+                        // Partial name match: pick j's name contains pick i's opponent keyword
+                        if (oi.length > 3 && aj.indexOf(oi.split('').slice(0,5).join(''))!==-1) return false;
+                        if (oj.length > 3 && ai.indexOf(oj.split('').slice(0,5).join(''))!==-1) return false;
+                        // Also check via gameWPs
+                        var conflict = false;
+                        if (typeof gameWPs !== 'undefined') {
+                            gameWPs.forEach(function(gd) {
+                                if (!gd.data || conflict) return;
+                                var h = (gd.data.homeTeam||'').toLowerCase().replace(/\s+/g,'');
+                                var a = (gd.data.awayTeam||'').toLowerCase().replace(/\s+/g,'');
+                                var iHome = h.indexOf(ai)!==-1||ai.indexOf(h.split(' ').pop())!==-1;
+                                var iAway = a.indexOf(ai)!==-1||ai.indexOf(a.split(' ').pop())!==-1;
+                                var jHome = h.indexOf(aj)!==-1||aj.indexOf(h.split(' ').pop())!==-1;
+                                var jAway = a.indexOf(aj)!==-1||aj.indexOf(a.split(' ').pop())!==-1;
+                                if ((iHome&&jAway)||(iAway&&jHome)) conflict = true;
+                            });
+                        }
+                        if (conflict) return false;
+                    }
+                }
+                return true;
+            });
+
+            if (!flexCombos.length) flexCombos = [[]];
+
+            // Build slip objects with payout math
+            var slips = flexCombos.map(function(flexPicks) {
+                var legs = _combCore.concat(flexPicks);
+                // Compute parlay decimal odds = product of all leg decimal odds
+                var parlayDecimal = legs.reduce(function(acc, item) {
+                    var o = item.odds || item; // handle both object and string
+                    var oddsStr = (typeof o === 'object') ? (o.odds||'') : o;
+                    return acc * _oddsToDecimal(oddsStr);
+                }, 1);
+                var payout = stakePerSlip * parlayDecimal;
+                var profit = payout - stakePerSlip;
+                // Per-leg implied win prob product
+                var winProb = legs.reduce(function(acc, item) {
+                    var oddsStr = (typeof item === 'object') ? (item.odds||'') : item;
+                    return acc * _oddsToImplied(oddsStr);
+                }, 1);
+                return { legs: legs, parlayDecimal: parlayDecimal, payout: payout, profit: profit, winProb: winProb, stake: stakePerSlip };
+            });
+
+            // ── Portfolio summary ──
+            var totalSlips  = slips.length;
+            var totalStaked = totalSlips * stakePerSlip;
+            var expectedReturn = slips.reduce(function(s,slip){ return s + slip.winProb * slip.payout; }, 0);
+            var portfolioEV = ((expectedReturn - totalStaked) / totalStaked * 100).toFixed(1);
+            var evCol = parseFloat(portfolioEV) > 0 ? '#10b981' : '#ef4444';
+
+            // Break-even: how many slips need to hit to recover stake
+            // All slips have same payout if same odds — find min hits needed
+            var avgPayout = slips.reduce(function(s,sl){return s+sl.payout;},0)/slips.length;
+            var breakEvenSlips = Math.ceil(totalStaked / avgPayout);
+
+            // Scenario builder: if K slips hit (K=1..totalSlips)
+            var scenarioRows = '';
+            var maxShow = Math.min(totalSlips, 8);
+            for (var k2 = 0; k2 <= maxShow; k2++) {
+                var grossReturn = k2 * avgPayout;
+                var net = grossReturn - totalStaked;
+                var netCol = net >= 0 ? '#10b981' : '#ef4444';
+                var isBreakEven = k2 === breakEvenSlips;
+                scenarioRows += '<tr style="'+(isBreakEven?'background:#f59e0b11;':'')+'">'
+                    + '<td style="padding:4px 8px;color:#fff;font-weight:'+(isBreakEven?'800':'400')+';">'+k2+' of '+totalSlips+'</td>'
+                    + '<td style="padding:4px 8px;color:#10b981;">'+_fmt(grossReturn)+'</td>'
+                    + '<td style="padding:4px 8px;color:'+netCol+';font-weight:700;">'+(net>=0?'+':'')+_fmt(net)+'</td>'
+                    + (isBreakEven ? '<td style="padding:4px 8px;color:#f59e0b;font-size:9px;font-weight:700;">← BREAK EVEN</td>' : '<td></td>')
+                    + '</tr>';
+            }
+
+            // ── Render EV + money summary ──
+            var evEl = document.getElementById('comb-ev');
+            evEl.style.display = 'block';
+            evEl.innerHTML = ''
+                + '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px;">'
+                +   '<div><div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">SLIPS</div><div style="font-size:20px;font-weight:900;color:#fff;">'+totalSlips+'</div></div>'
+                +   '<div><div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">TOTAL STAKED</div><div style="font-size:20px;font-weight:900;color:#fff;">'+_fmt(totalStaked)+'</div></div>'
+                +   '<div><div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">AVG PAYOUT/SLIP</div><div style="font-size:20px;font-weight:900;color:#a78bfa;">'+_fmt(avgPayout)+'</div></div>'
+                +   '<div><div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">EXP. RETURN</div><div style="font-size:20px;font-weight:900;color:'+evCol+';">'+_fmt(expectedReturn)+'</div></div>'
+                +   '<div><div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">PORTFOLIO EV</div><div style="font-size:20px;font-weight:900;color:'+evCol+';">'+portfolioEV+'%</div></div>'
+                +   '<div><div style="font-size:9px;color:#4a5568;font-weight:700;letter-spacing:1px;">BREAK EVEN</div><div style="font-size:14px;font-weight:800;color:#f59e0b;">'+breakEvenSlips+' slip'+(breakEvenSlips!==1?'s':'')+' must hit</div></div>'
+                + '</div>'
+                + '<div style="font-size:10px;color:#4a5568;font-weight:700;letter-spacing:1px;margin-bottom:6px;">SCENARIO CALCULATOR — if X slips hit:</div>'
+                + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;">'
+                +   '<thead><tr style="border-bottom:1px solid #1a2535;">'
+                +     '<th style="padding:4px 8px;color:#8b92a7;text-align:left;font-weight:700;">Slips Hit</th>'
+                +     '<th style="padding:4px 8px;color:#8b92a7;text-align:left;font-weight:700;">Gross Return</th>'
+                +     '<th style="padding:4px 8px;color:#8b92a7;text-align:left;font-weight:700;">Net P&L</th>'
+                +     '<th></th>'
+                +   '</tr></thead>'
+                +   '<tbody>' + scenarioRows + '</tbody>'
+                + '</table></div>'
+                + '<div style="margin-top:8px;font-size:10px;color:#4a5568;">Stake: '+_fmt(stakePerSlip)+'/slip · '+totalSlips+' slips · Avg parlay decimal: '+avgPayout.toFixed(2)+'x · Note: enter American odds per pick for accurate payouts. Blank odds default to -110.</div>';
+
+            // ── Render slip cards ──
+            var slipsEl   = document.getElementById('comb-slips');
+            var titleEl   = document.getElementById('comb-output-title');
+            var outEl     = document.getElementById('comb-output');
+            titleEl.innerHTML = '<span style="color:#fff;">'+totalSlips+' Parlay Slip'+(totalSlips>1?'s':'')+' · '+_combCore.length+' core + '+Math.min(k,_combFlex.length)+' of '+_combFlex.length+' flex</span>'
+                + ' <span style="color:#4a5568;font-size:10px;">Stake: '+_fmt(stakePerSlip)+'/slip · Total: '+_fmt(totalStaked)+'</span>';
+            slipsEl.innerHTML = slips.map(function(slip, idx) {
+                var profitCol = slip.profit >= 0 ? '#10b981' : '#ef4444';
+                return '<div style="background:#080c12;border:1px solid #1a2535;border-radius:6px;padding:10px;position:relative;">'
+                    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+                    +   '<span style="font-size:9px;color:#4a5568;font-weight:700;">SLIP #'+(idx+1)+'</span>'
+                    +   '<span style="font-size:10px;font-weight:800;color:'+profitCol+';">'+_fmt(slip.payout)+' return</span>'
+                    + '</div>'
+                    + slip.legs.map(function(item, ti) {
+                        var name   = (typeof item==='object') ? item.name : item;
+                        var odds   = (typeof item==='object') ? (item.odds||'—') : '—';
+                        var isFlex = _combFlex.some(function(f){ return f.name === name; });
+                        var col    = isFlex ? '#a78bfa' : '#f59e0b';
+                        var lbl    = isFlex ? 'FLEX' : 'CORE';
+                        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid #0f1419;">'
+                            + '<div style="display:flex;align-items:center;gap:5px;">'
+                            +   '<span style="font-size:8px;font-weight:700;color:'+col+';background:'+col+'18;border-radius:2px;padding:1px 4px;">'+lbl+'</span>'
+                            +   '<span style="font-size:11px;font-weight:700;color:#fff;">'+(ti+1)+'. '+name+'</span>'
+                            + '</div>'
+                            + '<span style="font-size:10px;color:#10b981;font-weight:700;">'+odds+'</span>'
+                            + '</div>';
+                    }).join('')
+                    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">'
+                    +   '<button onclick="navigator.clipboard.writeText(\''+slip.legs.map(function(l){return typeof l==='object'?l.name:l;}).join(' + ')+'\')" style="background:#1a2535;border:none;color:#8b92a7;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:9px;">&#128203; Copy</button>'
+                    +   '<span style="font-size:9px;color:#4a5568;">'+(slip.winProb*100).toFixed(1)+'% win prob</span>'
+                    + '</div>'
+                    + '</div>';
+            }).join('');
+            outEl.style.display = 'block';
+        }
+
         async function generateDailyParlay() {
             const parlayDiv = document.getElementById('daily-parlay');
             if (!parlayDiv) return;
@@ -13883,16 +14672,66 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                     } catch(e) { return { tier: null }; }
                                 })();
 
+                                // ── VPT+DNA LOSER and R4 WARN detection for parlay tier ──
+                                const _obsR3 = (typeof getObservedDailyRoots==='function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+                                const _vptR3 = (typeof computeVPTRoots==='function') ? computeVPTRoots() : null;
+                                const _vptDnaLoserFlag = (function(){
+                                    try { if(!_vptR3||!_obsR3) return false;
+                                        return (typeof checkVPTDNAAlignment==='function') &&
+                                            !checkVPTDNAAlignment(tapeWinner,_vptR3,_obsR3) &&
+                                            !!checkVPTDNAAlignment(tapeLosing,_vptR3,_obsR3);
+                                    } catch(e){return false;}
+                                })();
+                                const _r4WarnFlag = (function(){
+                                    try {
+                                        var _p4=tapeWinner.trim().split(/\s+/),_r4c=0;
+                                        var _v4=[tapeWinner,_p4[_p4.length-1]||tapeWinner,_p4[0]||tapeWinner,_p4.map(function(x){return x[0]||'';}).join('').toUpperCase()];
+                                        _v4.forEach(function(v){Object.values(CIPHERS).forEach(function(fn){if(calculateDigitalRoot(fn(v)).root===4)_r4c++;});});
+                                        if(_r4c<3) return false;
+                                        return Object.values(allVW).some(function(vw){return vw.dpm===4||vw.un===4;});
+                                    } catch(e){return false;}
+                                })();
+                                const _trapVal = _gmTrapResult.tier || null;
+                                // Sport-specific lock accuracy (updated Mar 26 2026)
+                                const _SLAC = {nba:{quad:1.00,triple:0.90,other:0.65},cbb:{quad:0.75,triple:0.90,other:0.62},
+                                               nhl:{quad:0.33,triple:0.90,other:0.52},mlb:{quad:0.60,triple:0.90,other:0.56},
+                                               soccer:{quad:0.60,triple:0.90,other:0.55},cfb:{quad:0.65,triple:0.90,other:0.60}};
+                                const _sAcc = _SLAC[sport] || {quad:0.65,triple:0.90,other:0.60};
+                                function _sigConf(lt){
+                                    var base=lt==='quad'?_sAcc.quad:lt==='triple'?_sAcc.triple:_sAcc.other;
+                                    var pen=0;
+                                    if(_vptDnaLoserFlag) pen+=0.15;
+                                    if(_r4WarnFlag)      pen+=0.08;
+                                    if(_trapVal===1)     pen+=0.12;
+                                    if(_trapVal===2)     pen+=0.06;
+                                    return Math.max(1,Math.round(base*(1-pen)*100));
+                                }
+                                function _pickTier(lt){
+                                    var conf=_sigConf(lt);
+                                    if(conf<25) return 'EXCLUDE';
+                                    if(sport==='nhl'&&lt==='quad'&&_vptDnaLoserFlag) return 'EXCLUDE';
+                                    if(_vptDnaLoserFlag) return 'HIGH_RISK';
+                                    if(_trapVal===1&&(lt==='quad'||lt==='triple')) return 'HIGH_RISK';
+                                    if(_trapVal===1) return 'HIGH_RISK';
+                                    if(_r4WarnFlag&&lt!=='quad'&&lt!=='triple') return 'HIGH_RISK';
+                                    if((lt==='quad'||lt==='triple')&&!_vptDnaLoserFlag&&!_r4WarnFlag&&!_trapVal) return 'ELITE';
+                                    if(['a_v2vg','b_v2vg','ab_v2','ab_vg'].indexOf(lt)!==-1&&!_vptDnaLoserFlag&&!_trapVal) return 'STRONG';
+                                    return 'STANDARD';
+                                }
                                 function _mkPick(lockType, bonus, label) {
+                                    var lt=lockType==='quad'?'quad':(['a_v2vg','b_v2vg','ab_v2','ab_vg'].indexOf(lockType)!==-1?'triple':'other');
+                                    var tier=_pickTier(lt), sigPct=_sigConf(lt);
+                                    if(tier==='EXCLUDE') return null;
                                     return {
                                         winner: tapeWinner, loser: tapeLosing, homeTeam, awayTeam,
                                         sport, sportEmoji: sportConfig.emoji||'🎯', gameTime,
-                                        winnerConviction: { percentage: Math.min(99, Math.round(50+(margin/120)*45)+bonus), label },
+                                        winnerConviction: { percentage: Math.min(99, Math.round(50+(margin/120)*45+bonus)), label, reasoning: [], matchingCalendars: _lkCals },
                                         matchingCalendars: _lkCals, supportingCals: _lkCals,
                                         tapeMargin: margin, lockType, isToday: _isToday,
                                         v2Available: _v2Winner !== null, modeAConv: _modeAConv,
-                                        trapTier: _gmTrapResult.tier || null,
-                                        trapType: _gmTrapResult.gateType || null
+                                        trapTier: _trapVal, trapType: _gmTrapResult.gateType || null,
+                                        vptDnaLoser: _vptDnaLoserFlag, r4Warn: _r4WarnFlag,
+                                        pickTier: tier, signalConfPct: sigPct
                                     };
                                 }
 
@@ -13914,17 +14753,17 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                         allDNA.push(p); todayDNA.push(p);
                                     }
                                 })();
-                                if (_lk_QUAD)                               { const p=_mkPick('quad',25,'⚡ PERFECT STORM'); allQuadLocks.push(p); if(_isToday) todayQuadLocks.push(p); allLockPicks.push(p); if(_isToday) todayLockPicks.push(p); }
-                                if (_lk_ABV2  && !_lk_QUAD)                { const p=_mkPick('ab_v2',16,'🔮 ORACLE'); allABV2.push(p); if(_isToday) todayABV2.push(p); }
-                                if (_lk_ABVG  && !_lk_QUAD)                { const p=_mkPick('ab_vg',16,'🎯 PHANTOM'); allABVG.push(p); if(_isToday) todayABVG.push(p); }
-                                if (_lk_AV2VG && !_lk_QUAD)                { const p=_mkPick('a_v2vg',16,'🔑 MASTER KEY'); allAV2VG.push(p); if(_isToday) todayAV2VG.push(p); }
-                                if (_lk_BV2VG && !_lk_QUAD)                { const p=_mkPick('b_v2vg',16,'🧭 COMPASS'); allBV2VG.push(p); if(_isToday) todayBV2VG.push(p); }
-                                if (_lk_AB    && !_lk_ABV2 && !_lk_ABVG)  { const p=_mkPick('ab',10,'🌀 TWIN SIGNAL'); allAB.push(p); if(_isToday) todayAB.push(p); }
-                                if (_lk_V2VG  && !_lk_BV2VG)              { const p=_mkPick('v2vg',10,'💡 MARKET ALIGNMENT'); allV2VG.push(p); if(_isToday) todayV2VG.push(p); }
-                                if (_lk_AV2   && !_lk_ABV2 && !_lk_AV2VG){ const p=_mkPick('av2',10,'🔬 CONVICTION+MODEL'); allAV2.push(p); if(_isToday) todayAV2.push(p); }
-                                if (_lk_BV2   && !_lk_ABV2 && !_lk_BV2VG){ const p=_mkPick('bv2',10,'📊 FREQUENCY+MODEL'); allBV2.push(p); if(_isToday) todayBV2.push(p); }
-                                if (_lk_AVG   && !_lk_ABVG && !_lk_AV2VG){ const p=_mkPick('avg',10,'⚔️ CONVICTION+MARKET'); allAVG.push(p); if(_isToday) todayAVG.push(p); }
-                                if (_lk_BVG   && !_lk_ABVG && !_lk_BV2VG){ const p=_mkPick('bvg',10,'🌊 FREQUENCY+MARKET'); allBVG.push(p); if(_isToday) todayBVG.push(p); }
+                                if (_lk_QUAD)                               { const p=_mkPick('quad',25,'⚡ PERFECT STORM'); if(p){ allQuadLocks.push(p); if(_isToday) todayQuadLocks.push(p); allLockPicks.push(p); if(_isToday) todayLockPicks.push(p); }}
+                                if (_lk_ABV2  && !_lk_QUAD)                { const p=_mkPick('ab_v2',16,'🔮 ORACLE'); if(p){ allABV2.push(p); if(_isToday) todayABV2.push(p); }}
+                                if (_lk_ABVG  && !_lk_QUAD)                { const p=_mkPick('ab_vg',16,'🎯 PHANTOM'); if(p){ allABVG.push(p); if(_isToday) todayABVG.push(p); }}
+                                if (_lk_AV2VG && !_lk_QUAD)                { const p=_mkPick('a_v2vg',16,'🔑 MASTER KEY'); if(p){ allAV2VG.push(p); if(_isToday) todayAV2VG.push(p); }}
+                                if (_lk_BV2VG && !_lk_QUAD)                { const p=_mkPick('b_v2vg',16,'🧭 COMPASS'); if(p){ allBV2VG.push(p); if(_isToday) todayBV2VG.push(p); }}
+                                if (_lk_AB    && !_lk_ABV2 && !_lk_ABVG)  { const p=_mkPick('ab',10,'🌀 TWIN SIGNAL'); if(p){ allAB.push(p); if(_isToday) todayAB.push(p); }}
+                                if (_lk_V2VG  && !_lk_BV2VG)              { const p=_mkPick('v2vg',10,'💡 MARKET ALIGNMENT'); if(p){ allV2VG.push(p); if(_isToday) todayV2VG.push(p); }}
+                                if (_lk_AV2   && !_lk_ABV2 && !_lk_AV2VG){ const p=_mkPick('av2',10,'🔬 CONVICTION+MODEL'); if(p){ allAV2.push(p); if(_isToday) todayAV2.push(p); }}
+                                if (_lk_BV2   && !_lk_ABV2 && !_lk_BV2VG){ const p=_mkPick('bv2',10,'📊 FREQUENCY+MODEL'); if(p){ allBV2.push(p); if(_isToday) todayBV2.push(p); }}
+                                if (_lk_AVG   && !_lk_ABVG && !_lk_AV2VG){ const p=_mkPick('avg',10,'⚔️ CONVICTION+MARKET'); if(p){ allAVG.push(p); if(_isToday) todayAVG.push(p); }}
+                                if (_lk_BVG   && !_lk_ABVG && !_lk_BV2VG){ const p=_mkPick('bvg',10,'🌊 FREQUENCY+MARKET'); if(p){ allBVG.push(p); if(_isToday) todayBVG.push(p); }}
                             }
                         }
 
@@ -13993,6 +14832,18 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 return acc;
             }, {}));
             
+            // ── Expose parlay pools to window for Combinator auto-populate ──
+            window._parlayAllPredictions = allPredictions;
+            window._parlayQuadLocks      = allQuadLocks;
+            window._parlayAV2VG          = allAV2VG;
+            window._parlayBV2VG          = allBV2VG;
+            window._parlayABV2           = allABV2;
+            window._parlayABVG           = allABVG;
+            window._parlayAB             = allAB;
+            window._parlayTodayQuad      = todayQuadLocks;
+            window._parlayTodayAV2VG     = todayAV2VG;
+            window._parlayGenerated      = true;
+
             // BIFURCATION ZONE: Games confirmed by 5+ calendars (strongest multi-cal signal)
             // All allPredictions already passed 3-cal gate; bifurcation requires even more
             const bifurcationPicks = allPredictions.filter(p =>
@@ -14591,7 +15442,19 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         } else if (p.trapTier === 3) {
                             html += '<div style="margin-top:3px;"><span title="LATENT TRAP (T3): Trap structure present but not activated by today DPM environment. Low urgency." style="background:#1a2030;color:#8b92a7;font-size:9px;padding:1px 6px;border-radius:3px;border:1px solid #2a3142;cursor:help;">〰️ LATENT TRAP</span></div>';
                         }
-                    html += '<div style="color:#8b92a7;font-size:10px;margin-top:2px;">' + _pickTimeHtml + '</div>';
+                    // ── Parlay Tier Badge + Signal Confidence % ──
+                if (p.pickTier) {
+                    var _tc = p.pickTier==='ELITE'?'#f59e0b':p.pickTier==='STRONG'?'#10b981':p.pickTier==='HIGH_RISK'?'#ef4444':'#667eea';
+                    var _tl = p.pickTier==='ELITE'?'🏆 ELITE':p.pickTier==='STRONG'?'✅ STRONG':p.pickTier==='HIGH_RISK'?'⚠️ HIGH RISK':'📊 STANDARD';
+                    var _sc = p.signalConfPct ? p.signalConfPct+'%' : '';
+                    html += '<div style="margin-top:4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">';
+                    html += '<span style="font-size:9px;font-weight:800;color:'+_tc+';background:'+_tc+'18;border:1px solid '+_tc+'44;border-radius:3px;padding:1px 7px;">'+_tl+'</span>';
+                    if (_sc) html += '<span style="font-size:9px;color:'+_tc+';font-weight:700;" title="Signal Confidence: sport-specific lock accuracy adjusted for warning badges">'+_sc+' CONF</span>';
+                    if (p.vptDnaLoser) html += '<span style="font-size:9px;color:#ef4444;background:#ef444415;border:1px solid #ef444433;border-radius:3px;padding:1px 5px;" title="VPT+DNA LOSER: Winner\'s dominant root appears in today\'s confirmed loser pattern. Risk flag.">⚡🧬 LOSER</span>';
+                    if (p.r4Warn) html += '<span style="font-size:9px;color:#f59e0b;background:#f59e0b15;border:1px solid #f59e0b33;border-radius:3px;padding:1px 5px;" title="R4 WARN: Winner\'s name variations cluster on Root 4, a VW loser anchor today.">⚠️ R4</span>';
+                    html += '</div>';
+                }
+                                html += '<div style="color:#8b92a7;font-size:10px;margin-top:2px;">' + _pickTimeHtml + '</div>';
                     html += '</div>';
                 });
                 
@@ -14855,9 +15718,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     isV4View: true
                 };
             }
-            
-            // Standard view — score by V2/V1 pick
-            const wins = results.filter(g => (g.predictedHomeWP > 50) === g.homeWon).length;
+            // Standard view — score by V4 merged pick first, V2 fallback (matches daily drill-down)
+            const wins = results.filter(g => {
+                const _p = g.v4Winner || (g.predictedHomeWP > 50 ? g.homeTeam : g.awayTeam);
+                const _a = g.homeWon ? g.homeTeam : g.awayTeam;
+                return _p && _a && _p === _a;
+            }).length;
             const losses = results.length - wins;
             const winRate = ((wins / results.length) * 100).toFixed(1);
             const vegasWins = results.filter(g => g.beatVegasSpread === true).length;
@@ -15697,7 +16563,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         var rootIsLoser  = DNA_L.indexOf(teamRoot) !== -1;
                         if (rootOnTarget && !isDna) {
                             // Root hits target but not the sequence pick — cipher resonance flag
-                            var rootTip = 'CIPHER HIT R' + teamRoot + ': This team\'s mascot cipher reduces to R' + teamRoot + ' — a target root today (7/1/3). Not the skip-pattern sequence pick but has cipher resonance. Watch as potential upset signal.';
+                            var rootTip = 'CIPHER HIT R' + teamRoot + ': This team\'s mascot cipher reduces to R' + teamRoot + ' — a target root today (' + (function(){ try { var _o=getObservedDailyRoots(); return 'R'+(_o.targets||[7,1,3]).join('/R'); } catch(e){ return 'R7/R1/R3'; }})() + '). Not the skip-pattern sequence pick but has cipher resonance. Watch as potential upset signal.';
                             tags.push('<span title="'+rootTip+'" style="color:#a78bfa99;font-size:9px;cursor:help;background:#a78bfa08;border:1px solid #a78bfa33;border-radius:3px;padding:1px 4px;">R'+teamRoot+'✓</span>');
                         } else if (rootIsLoser && !isDna) {
                             // R4/R5 loser signal — only show when this team is NOT the DNA sequence pick
@@ -16724,6 +17590,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     if (g.status !== 'COMPLETED' || g.homeWon === null || g.isTapeMatch) return false;
                     const sp = (g.sport||'').toLowerCase();
                     if (_exMLB && sp === 'mlb') return false;
+                    if (sp === 'mlb') { const _gd=new Date(g.gameDate||0).getTime(); if(_gd>0&&_gd<new Date('2026-03-25T00:00:00').getTime()) return false; }
                     if (_exSOC && sp === 'soccer') return false;
                     return true;
                 });
@@ -16787,28 +17654,28 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                   test: function(g){ return g.trapFlag === 'VOID_TRAP'; }},
                 // ── New tiered trap badges ──
                 // ── Cover and O/U result badges ──
-                { key:'v4_covered',      label:'💰 V4 COVERED',        color:'#10b981', tier:'flag',
+                { key:'v4_covered',      label:'💰 V4 COVERED',        color:'#10b981', tier:'result',
                   desc:'V4 predicted winner covered the Vegas spread.',
                   test: function(g){ return g.v4PickCoveredSpread === true; }},
-                { key:'v4_no_cover',     label:'❌ V4 NO COVER',        color:'#ef4444', tier:'flag',
+                { key:'v4_no_cover',     label:'❌ V4 NO COVER',        color:'#ef4444', tier:'result',
                   desc:'V4 predicted winner failed to cover the Vegas spread.',
                   test: function(g){ return g.v4PickCoveredSpread === false; }},
-                { key:'v2_covered',      label:'💰 V2 COVERED',        color:'#3b82f6', tier:'flag',
+                { key:'v2_covered',      label:'💰 V2 COVERED',        color:'#3b82f6', tier:'result',
                   desc:'V2 predicted winner covered the Vegas spread.',
                   test: function(g){ return g.v2PickCoveredSpread === true; }},
-                { key:'v4_total_hit',    label:'🎯 V4 TOTAL CORRECT',  color:'#10b981', tier:'flag',
+                { key:'v4_total_hit',    label:'🎯 V4 TOTAL CORRECT',  color:'#10b981', tier:'result',
                   desc:'V4 total prediction correctly called the Over or Under.',
                   test: function(g){ return g.v4TotalCorrect === true; }},
-                { key:'v4_total_miss',   label:'🎯 V4 TOTAL WRONG',    color:'#ef4444', tier:'flag',
+                { key:'v4_total_miss',   label:'🎯 V4 TOTAL WRONG',    color:'#ef4444', tier:'result',
                   desc:'V4 total prediction incorrectly called the Over/Under direction.',
                   test: function(g){ return g.v4TotalCorrect === false; }},
-                { key:'v2_total_hit',    label:'📊 V2 TOTAL CORRECT',  color:'#3b82f6', tier:'flag',
+                { key:'v2_total_hit',    label:'📊 V2 TOTAL CORRECT',  color:'#3b82f6', tier:'result',
                   desc:'V2 total prediction correctly called the Over or Under.',
                   test: function(g){ return g.v2TotalCorrect === true; }},
-                { key:'actual_over',     label:'⬆️ WENT OVER',          color:'#f59e0b', tier:'flag',
+                { key:'actual_over',     label:'⬆️ WENT OVER',          color:'#f59e0b', tier:'result',
                   desc:'Game total went Over the Vegas line.',
                   test: function(g){ return g.actualOver === true; }},
-                { key:'actual_under',    label:'⬇️ WENT UNDER',         color:'#8b5cf6', tier:'flag',
+                { key:'actual_under',    label:'⬇️ WENT UNDER',         color:'#8b5cf6', tier:'result',
                   desc:'Game total went Under the Vegas line.',
                   test: function(g){ return g.actualUnder === true; }},
 
@@ -16848,6 +17715,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 { key:'vpt_dna_align', label:'⚡🧬 VPT+DNA', color:'#fbbf24', tier:'flag',
                   desc:'Both the VPT cipher frequency root AND DNA dominant root of the predicted winner are confirmed target roots. Dual-system convergence.',
                   test: function(g){ return !!(g.vptDnaAlign); }},
+                { key:'vpt_dna_loser', label:'⚠️ VPT+DNA LOSER', color:'#ef4444', tier:'flag',
+                  desc:'Both VPT cipher root AND DNA dominant root of the predicted winner are confirmed LOSER roots. High-confidence fade signal.',
+                  test: function(g){ return !!(g.vptDnaLoser); }},
                 { key:'trap_tier1',    label:'☠️ VOID LOCK (Tier 1)',  color:'#ef4444', tier:'flag',
                   desc:'Both name variations flagged + 2+ top calendars in DPM trap mode. Highest-conviction upset signal.',
                   test: function(g){ return g.trapTier === 1; }},
@@ -16903,8 +17773,8 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 });
             });
 
-            const TIER_LABELS = { conviction:'Conviction Tier Badges', alignment:'Alignment Badges', flag:'Warning Flags' };
-            const TIER_ORDER  = ['conviction','alignment','flag'];
+            const TIER_LABELS = { conviction:'Conviction Tier Badges', alignment:'Alignment Badges', flag:'Warning Flags' , result:'Post-Game Result Badges (historical only)'};
+            const TIER_ORDER  = ['conviction','alignment','flag','result'];
 
             let html = '<div style="background:#080c12;min-height:100vh;padding:16px;">';
             html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">';
@@ -16928,6 +17798,11 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 html += '<div style="font-size:12px;color:#8b92a7;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">' + TIER_LABELS[tier] + '</div>';
                 html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">';
 
+                if (tier === 'result') {
+                    html += '<div style="background:#1a1200;border:1px solid #f59e0b44;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:11px;color:#f59e0b;">';
+                    html += '📋 These badges only resolve after a game completes — not pre-game or live signals. Track accuracy trends but do not use for real-time betting decisions.';
+                    html += '</div>';
+                }
                 tierBadges.forEach(function(b) {
                     const s = stats[b.key];
                     const total = s.w + s.l;
@@ -17289,7 +18164,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         <div class="stats-grid">
                             <div class="stat-card">
                                 <div class="stat-label">Games Tracked</div>
-                                <div class="stat-value">${overall.gamesTracked}${report.mlbExcluded > 0 ? '<span style="font-size:10px;color:#ef4444;margin-left:4px;">(+' + report.mlbExcluded + ' MLB excl.)</span>' : ''}</div>
+                                <div class="stat-value">${overall.gamesTracked}</div>
                             </div>
                             <div class="stat-card highlight" onclick="renderDailyWLReport()" title="Click to drill down into daily W-L history" style="cursor:pointer;transition:border-color 0.2s;" onmouseenter="this.style.borderColor='#3b82f6'" onmouseleave="this.style.borderColor=''">
                                 <div class="stat-label">🎯 W-L Record <span style="font-size:9px;color:#3b82f6;margin-left:4px;">↗ drill down</span></div>
@@ -17328,11 +18203,17 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                 const todayResults = allResults.filter(g => {
                                     if (!g.gameDate) return false;
                                     if (excludeMLBToday && (g.sport || '').toLowerCase() === 'mlb') return false;
+                                    const _gd=new Date(g.gameDate||0).getTime(); if((g.sport||'').toLowerCase()==='mlb'&&_gd>0&&_gd<new Date('2026-03-25').getTime()) return false;
                                     if (excludeSocToday && (g.sport || '').toLowerCase() === 'soccer') return false;
                                     const gDate = new Date(g.gameDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
                                     return gDate === todayStr;
                                 });
-                                const todayWins = todayResults.filter(g => (g.predictedHomeWP > 50) === g.homeWon).length;
+                                const todayWins = todayResults.filter(g => {
+                                    // Use V4 merged pick first (same as daily drill-down), fall back to V2
+                                    const _pred = g.v4Winner || (g.predictedHomeWP > 50 ? g.homeTeam : g.awayTeam);
+                                    const _act  = g.homeWon ? g.homeTeam : g.awayTeam;
+                                    return _pred && _act && _pred === _act;
+                                }).length;
                                 const todayTotal = todayResults.length;
                                 const todayLosses = todayTotal - todayWins;
                                 const todayWinRate = todayTotal > 0 ? (todayWins / todayTotal * 100).toFixed(1) + '%' : '—';
@@ -17958,7 +18839,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             `;
             
             // Sports excluded from overall but shown with their own card
-            const COUNT_ONLY_SPORTS = new Set(['mlb','soccer','tennis','mma','lacrosse','cricket','boxing','esports','rugby']);
+            const COUNT_ONLY_SPORTS = new Set(['soccer','tennis','mma','lacrosse','cricket','boxing','esports','rugby','cba','euroleague','soccer_friendly']); // MLB removed — Opening Day passed, now fully tracked
             // Sport cards
             ['nba', 'nfl', 'cbb', 'cfb', 'nhl', 'mlb', 'soccer', 'tennis', 'mma', 'lacrosse', 'cricket', 'boxing', 'esports', 'rugby'].forEach(sport => {
                 const sportReport = report[sport];
@@ -18040,8 +18921,12 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     _activeSportFilter = 'ALL'; window._pendingSportFilter = 'ALL';
                 }
                 const sortedPending = pending
-                    .filter(g => _activeSportFilter === 'ALL' || (g.sport||'unknown').toUpperCase() === _activeSportFilter)
-                    .sort((a, b) => a.gameDate - b.gameDate);
+                    .filter(g => {
+                        if (_activeSportFilter === 'ALL') return true;
+                        var sp = (g.sport||'unknown').toUpperCase();
+                        return sp === _activeSportFilter;
+                    })
+                    .sort((a, b) => new Date(a.gameDate).getTime() - new Date(b.gameDate).getTime());
                 const filteredCount = sortedPending.length;
 
                 // Search bar
@@ -18101,23 +18986,24 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 }, 35);
                 sortedPending.forEach(game => {
                     const gameDate = new Date(game.gameDate).toLocaleDateString();
-                    const daysSince = Math.floor((Date.now() - game.gameDate) / 86400000);
+                    const daysSince = Math.floor((Date.now() - new Date(game.gameDate).getTime()) / 86400000);
                     const daysDisplay = daysSince > 0 
                         ? `${daysSince} day${daysSince === 1 ? '' : 's'} ago`
                         : daysSince === 0
                         ? 'today'
                         : `in ${Math.abs(daysSince)} day${Math.abs(daysSince) === 1 ? '' : 's'}`;
 
-                    const isTape = game.isTapeMatch === true;
+                    const isTape = game.isTapeMatch === true || (game.sport === 'tennis' && !!game.kalshiTicker);
                     const tapeEmoji = game.sport === 'tennis' ? '🎾' : game.sport === 'mma' ? '🥊' : '⚡';
 
                     if (isTape) {
                         const tapeTotal = (game.tapeScoreA || 0) + (game.tapeScoreB || 0);
                         // Use stored v4Winner (composite pick) — NOT raw tapeScoreA vs B which ignores ModeA/LP/DNA
                         // Use v4Winner only for manually saved tape predictions (have modeAWinner set from full tape run)
-                        const predWinnerTape = (game.manualSave && game.v4Winner)
-                            ? game.v4Winner
-                            : (tapeTotal > 0 && (game.tapeScoreA || 0) > (game.tapeScoreB || 0) ? game.homeTeam : game.awayTeam);
+                const isKalshiTennis = !!(game.kalshiTicker);
+                const predWinnerTape = game.v4Winner
+                    ? game.v4Winner
+                    : (tapeTotal > 0 && (game.tapeScoreA || 0) > (game.tapeScoreB || 0) ? game.homeTeam : game.awayTeam);
                         const predLoserTape  = predWinnerTape === game.homeTeam ? game.awayTeam : game.homeTeam;
                         const winnerScoreTape = predWinnerTape === game.homeTeam ? (game.tapeScoreA || 0) : (game.tapeScoreB || 0);
                         const loserScoreTape  = predWinnerTape === game.homeTeam ? (game.tapeScoreB || 0) : (game.tapeScoreA || 0);
@@ -18128,15 +19014,17 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         const winnerCals = (predWinnerTape === game.homeTeam ? game.tapeTopCalsA : game.tapeTopCalsB) || [];
                         const calShortMap = {gregorian:'Greg',ancient_roman:'AncR',unc:'UNC',ifc:'IFC',ethiopian:'Eth',pure_sol:'SOL',future_gregorian:'FutG',future_gregorian_plus2:'FutG+2',gemini_rolling:'G-Roll'};
                         const calStr = winnerCals.map(function(c){ return calShortMap[c]||c; }).join(', ');
-                        const tapeV4Label = game.v4ConvictionLabel || '';
+                        const tapeV4Label = game.v4ConvictionLabel || game.v4WinnerBadge || '';
                         // Use stored blended confidence if available — more accurate than raw VW ratio
-                        const confPct = game.tapeConfFinal ? game.tapeConfFinal
-                            : tapeTotal > 0 ? Math.round(winnerScoreTape / tapeTotal * 100) : 50;
+                const confPct = isKalshiTennis
+                    ? (game.v4WinnerConviction || game.convictionA || 70)
+                    : (game.tapeConfFinal ? game.tapeConfFinal
+                            : tapeTotal > 0 ? Math.round(winnerScoreTape / tapeTotal * 100) : 50);
 
                         html += '<div class="pending-game-card" style="border-left: 3px solid #667eea;">' +
                             '<div class="pending-game-info" style="flex:1;">' +
                                 '<strong>' + tapeEmoji + ' ' + game.homeTeam + ' vs ' + game.awayTeam + '</strong>' +
-                                '<span class="game-date">' + gameDate + (game.gameTime ? ' · ' + game.gameTime : '') + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + ' · V4-Tape</span>' +
+                                '<span class="game-date">' + gameDate + (function(){ if(game.gameTime) return ' · ' + game.gameTime; var _gd=game.gameDate; if(!_gd) return ''; try{ return ' · '+new Date(_gd).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }catch(e){return '';} })() + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + ' · V4-Tape</span>' +
                                 // Predicted winner — prominent
                                 '<div style="margin-top:6px;background:#0d1424;border:1px solid #667eea44;border-radius:5px;padding:6px 10px;">' +
                                     '<div style="font-size:10px;color:#667eea;font-weight:700;margin-bottom:3px;">⚡ PREDICTED WINNER</div>' +
@@ -18214,7 +19102,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     html += '<div class="pending-game-card" data-search="'+_sh+'">' +
                         '<div class="pending-game-info" style="flex:1;">' +
                         '<strong>' + game.awayTeam + ' @ ' + game.homeTeam + '</strong>' +
-                        '<span class="game-date">' + gameDate + (game.gameTime ? ' · ' + game.gameTime : '') + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + '</span>' +
+                        '<span class="game-date">' + gameDate + (function(){ if(game.gameTime) return ' · ' + game.gameTime; var _gd=game.gameDate; if(!_gd) return ''; try{ return ' · '+new Date(_gd).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }catch(e){return '';} })() + ' (' + daysDisplay + ') · ' + game.sport.toUpperCase() + '</span>' +
                         '<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                             // V2 pick
                             '<span style="font-size:9px;color:#10b981;font-weight:700;background:#10b98115;border:1px solid #10b98133;border-radius:3px;padding:1px 5px;">V2</span>' +
@@ -18245,6 +19133,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         (pendingSignals.length ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">' + pendingSignals.join('') + '</div>' : '') +
                         '</div>' +
                         '<div class="pending-game-actions">' +
+                        '<input type="checkbox" class="pending-game-cb" '+'data-gameid="'+(game.gameId||'').replace(/"/g,'')+'" '+'onchange="updateBulkDeleteBtn()" style="width:14px;height:14px;cursor:pointer;accent-color:#a78bfa;margin-right:4px;">'+
                             '<input type="number" id="away-score-' + game.gameId + '" placeholder="Away" style="width: 60px;">' +
                             '<span>-</span>' +
                             '<input type="number" id="home-score-' + game.gameId + '" placeholder="Home" style="width: 60px;">' +
@@ -18317,9 +19206,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                                         ${accuracyFilters.excludeMLB ? 'checked' : ''}
                                         onchange="accuracyFilters.excludeMLB=this.checked; renderAccuracyDashboard()"
                                         style="width:14px;height:14px;accent-color:#ef4444;cursor:pointer;">
-                                    <span style="color:#ef4444;font-size:11px;font-weight:700;">⚾ Exclude MLB</span>
+                                    <span style="color:#8b92a7;font-size:11px;font-weight:700;">⚾ Exclude MLB</span>
                                 </label>
-                                ${accuracyFilters.excludeMLB ? '<span style="background:#ef444422;color:#ef4444;font-size:10px;padding:1px 7px;border-radius:3px;border:1px solid #ef444433;">MLB excluded</span>' : ''}
+                                
                                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;" title="Exclude Soccer — no Vegas lines or strong V2 model">
                                     <input type="checkbox" id="soccer-exclude-toggle"
                                         ${accuracyFilters.excludeSoccer ? 'checked' : ''}
@@ -19125,9 +20014,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
 
             // ── Config ──
             // Toggle MLB inclusion here when regular season starts (3/25)
-            var INCLUDE_MLB = false;
-            var VEGAS_SPORTS  = ['nba','nfl','cbb','cfb','nhl'].concat(INCLUDE_MLB ? ['mlb'] : []);
-            var TAPE_SPORTS   = ['tennis','mma','lacrosse','cricket','boxing','esports','rugby'];
+            var INCLUDE_MLB = true; // Opening Day was March 25, 2026
+            var VEGAS_SPORTS  = ['nba','nfl','cbb','cfb','nhl','mlb']; // MLB now always included
+            var TAPE_SPORTS   = ['tennis','tennis-atp','tennis-wta','mma','lacrosse','cricket','boxing','esports','rugby','cba','euroleague','soccer_friendly'];
             var ALL_SPORTS    = VEGAS_SPORTS.concat(['soccer']).concat(TAPE_SPORTS);
             var MIN_GAMES     = 5; // minimum games for a sport tier to show stats
 
@@ -19410,17 +20299,46 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         h += '<div style="font-size:11px;color:#4a5568;margin-top:6px;">Framework score: <span style="color:#fff;font-weight:700;">'+dec.compositeScore+'</span>'+changeHtml+'</div>';
                         h += '</div>';
                     }
+                // ── Tennis sub-rows: ATP and WTA breakdown ──
+                if (sportKey === 'tennis') {
+                    var atpGames = bySport['tennis-atp'] ? bySport['tennis-atp'].games : [];
+                    var wtaGames = bySport['tennis-wta'] ? bySport['tennis-wta'].games : [];
+                    if (atpGames.length > 0 || wtaGames.length > 0) {
+                        h += '<div style="margin-top:8px;border-top:1px solid #1a2535;padding-top:8px;">';
+                        h += '<div style="font-size:10px;color:#4a5568;font-weight:700;margin-bottom:5px;">ATP / WTA BREAKDOWN</div>';
+                        function subRow(label, games) {
+                            if (!games.length) return '<div style="font-size:11px;color:#2a3142;padding:3px 0;">' + label + ': 0 games</div>';
+                            var w=0,l=0;
+                            games.forEach(function(g){
+                                var v4pick = g.predictedHomeWP >= 50;
+                                var correct = v4pick === g.homeWon;
+                                correct ? w++ : l++;
+                            });
+                            var pct = games.length > 0 ? (w/games.length*100).toFixed(1)+'%' : 'N/A';
+                            var col = parseFloat(pct)>=60?'#10b981':parseFloat(pct)>=50?'#f59e0b':'#ef4444';
+                            return '<div style="display:flex;justify-content:space-between;align-items:center;' +
+                                'padding:3px 8px;background:#0a0e15;border-radius:4px;margin-bottom:3px;">' +
+                                '<span style="font-size:11px;color:#8b92a7;">' + label + '</span>' +
+                                '<span style="font-size:11px;font-weight:700;color:' + col + ';">' +
+                                w + '-' + l + ' (' + pct + ')</span></div>';
+                        }
+                        h += subRow('🎾 ATP', atpGames);
+                        h += subRow('🎾 WTA', wtaGames);
+                        h += '</div>';
+                    }
+                }
+
                 return h;
             }
 
             // ── Build the full page ──
-            var sportNameMap = {nba:'NBA',nfl:'NFL',cbb:'College Basketball',cfb:'College Football',nhl:'NHL',mlb:'MLB',soccer:'Soccer',tennis:'🎾 Tennis',mma:'🥊 MMA',lacrosse:'🥍 Lacrosse',cricket:'🏏 Cricket',boxing:'🥊 Boxing',esports:'🎮 E-Sports',rugby:'🏉 Rugby'};
+            var sportNameMap = {nba:'NBA',nfl:'NFL',cbb:'College Basketball',cfb:'College Football',nhl:'NHL',mlb:'MLB',soccer:'Soccer',tennis:'🎾 Tennis','tennis-atp':'🎾 Tennis - ATP','tennis-wta':'🎾 Tennis - WTA',mma:'🥊 MMA',lacrosse:'🥍 Lacrosse',cricket:'🏏 Cricket',boxing:'🥊 Boxing',esports:'🎮 E-Sports',rugby:'🏉 Rugby',cba:'🏀 CBA (Chinese Basketball)',euroleague:'🏀 Euroleague',soccer_friendly:'⚽ Soccer — Intl Friendlies'};
 
             var h = '<div style="max-width:1100px;margin:0 auto;padding:20px;">';
             h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">';
             h += '<button onclick="renderAccuracyDashboard()" style="background:#1a2535;border:1px solid #2a3142;color:#8b92a7;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;">← Back</button>';
             h += '<h2 style="margin:0;color:#3b82f6;font-size:16px;font-weight:800;">⚔️ V4 vs V2 Decision Framework</h2>';
-            h += '<span style="font-size:11px;color:#4a5568;">'+all.length+' total results · updates automatically · MLB excluded (pre-season)</span>';
+            h += '<span style="font-size:11px;color:#4a5568;">'+all.length+' total results · updates automatically</span>';
             h += '</div>';
 
             // ── Aggregate summary ──
@@ -19473,11 +20391,14 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 h += ' Combined: '+tapeGames.length+' games tracked · V4 overall: '+stTape.v4wr;
                 h += '</div>';
             }
-            TAPE_SPORTS.forEach(function(s) { h += sportCard(s, sportNameMap[s]||s.toUpperCase()); });
+            TAPE_SPORTS.forEach(function(s) {
+                if (s === 'tennis-atp' || s === 'tennis-wta') return; // rendered as tennis sub-rows
+                h += sportCard(s, sportNameMap[s]||s.toUpperCase());
+            });
 
             // ── MLB note ──
             h += '<div style="background:#1a0808;border:1px solid #ef444422;border-radius:6px;padding:10px 14px;margin-top:16px;font-size:11px;color:#ef4444;">';
-            h += '⚾ <strong>MLB excluded</strong> — Spring Training results not counted. Toggle <code>INCLUDE_MLB = true</code> in the framework function when regular season begins (3/25).';
+            h += '';
             h += '</div>';
 
             h += '</div>';
@@ -19902,7 +20823,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                 const sn = document.getElementById('cbb-sub-nav');
                 if (sn) sn.style.display = 'none';
             }
-            games = [];
+            games = []; _fetchGeneration++;
             gameWPs.clear();
             fetchGames();
         }
@@ -20339,8 +21260,16 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     } else if (sport === 'cbb') {
                         league = 'mens-college-basketball';
                         sportType = 'basketball';
+                    } else if (sport === 'nhl') {
+                        league = 'nhl';
+                        sportType = 'hockey';
+                    } else if (sport === 'mlb') {
+                        league = 'mlb';
+                        sportType = 'baseball';
+                    } else {
+                        // Unknown sport — return null to avoid undefined URL crash
+                        return null;
                     }
-                    
                     // Fetch both teams' stats in parallel
                     const [homeStats, awayStats] = await Promise.all([
                         fetch(`https://site.api.espn.com/apis/site/v2/sports/${sportType}/${league}/teams/${homeTeamId}/statistics`).then(r => r.json()),
@@ -21048,6 +21977,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
         }
 
         async function fetchGames() {
+        const _myGeneration = _fetchGeneration; // discard if sport switches mid-fetch
             // CHECK: If user is viewing Accuracy, Gematria Lab, Bracket or Pulse, don\'t refresh games
             const accuracyTab = document.querySelector('[data-sport="accuracy"]');
             if (accuracyTab && accuracyTab.classList.contains('active')) {
@@ -21227,6 +22157,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     }
                 });
 
+        if (_myGeneration !== _fetchGeneration) return; // sport switched, discard
                 games = uniqueEvents.filter(event => {
                     const status = event.competitions[0].status.type.state;
                     // Show everything except completed games in the live card display
@@ -21369,42 +22300,86 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     const modeBWinner = homeTS.total >= awayTS.total ? homeTeam : awayTeam;
                     const margin      = Math.abs(homeTS.total - awayTS.total);
 
-                    // ── MERGED V4 ENGINE — data-driven rules from audit ──
-                    // Rules derived from 140+ game pattern recognition (Mar 2026):
-                    // When A and B AGREE → use that pick (highest reliability)
-                    // When they DISAGREE, apply:
-                    //   Rule 1: Tape margin ≥100pts → USE A (6/7 = 86% on disagreements)
-                    //   Rule 2: Tape margin <30pts  → USE B (10/16 = 63% on disagreements)
-                    //   Rule 3: Tape margin 30-99pts → USE A (slight edge 50% vs 46%)
-                    //   Rule 4: Conv 96-100% → lean B (33% > 29% at extreme conviction)
-                    // V2 alignment: when V2 matches one mode, boost that mode's confidence
+                    // ── Composite scorer for R_INCONSISTENT fallback ──
+                    // When Mode A is inconsistent, use composite (like Tale of the Tape)
+                    // instead of raw tape total. Composite adds DNA variation bonuses.
+                    const _compScores = (function() {
+                        try {
+                            const _obsR2 = (typeof getObservedDailyRoots === 'function') ? getObservedDailyRoots() : {targets:[7,1,3],losers:[4,5]};
+                            const _dnaT = (_obsR2 && _obsR2.targets && _obsR2.targets.length) ? _obsR2.targets : [7,1,3];
+                            const _dnaL = (_obsR2 && _obsR2.losers  && _obsR2.losers.length)  ? _obsR2.losers  : [4,5];
+                            function _varDNA_sb(name) {
+                                var parts=name.trim().split(/\s+/),score=0;
+                                var vars={full:name,city:parts.length>1?parts.slice(0,-1).join(' '):name,mascot:parts[parts.length-1]||name,abbrev:parts.map(function(p){return p[0]||'';}).join('').toUpperCase()};
+                                Object.keys(vars).forEach(function(vk){ var rc={}; Object.keys(CIPHERS).forEach(function(ck){ var r=calculateDigitalRoot(CIPHERS[ck](vars[vk])).root; rc[r]=(rc[r]||0)+1; }); var dom=Object.keys(rc).map(Number).sort(function(a,b){return rc[b]-rc[a];})[0]; if(_dnaT.indexOf(dom)!==-1)score++; });
+                                return score;
+                            }
+                            function _masterRoot_sb(name) {
+                                var parts=name.trim().split(/\s+/),vars={full:name,mascot:parts[parts.length-1]||name};
+                                var best=null,bestC=0;
+                                Object.keys(vars).forEach(function(vk){ Object.keys(CIPHERS).forEach(function(ck){ var r=calculateDigitalRoot(CIPHERS[ck](vars[vk])).root; var c=(rc=>rc[r]||(rc[r]=0,++rc[r]))({});  if(c>bestC){bestC=c;best=r;} }); });
+                                return best;
+                            }
+                            var _dnaH = _varDNA_sb(homeTeam), _dnaA = _varDNA_sb(awayTeam);
+                            var _mrH  = _masterRoot_sb(homeTeam), _mrA2 = _masterRoot_sb(awayTeam);
+                            var _mrBonusH = _mrH && _dnaT.indexOf(_mrH)!==-1 ? 50 : _mrH && _dnaL.indexOf(_mrH)!==-1 ? -35 : 0;
+                            var _mrBonusA = _mrA2 && _dnaT.indexOf(_mrA2)!==-1 ? 50 : _mrA2 && _dnaL.indexOf(_mrA2)!==-1 ? -35 : 0;
+                            var _skipH = (_skipResult && _skipResult.pick === homeTeam) ? 20 : 0;
+                            var _skipA = (_skipResult && _skipResult.pick === awayTeam) ? 20 : 0;
+                            var compHome = homeTS.total + _dnaH*25 + _mrBonusH + _skipH;
+                            var compAway = awayTS.total + _dnaA*25 + _mrBonusA + _skipA;
+                            return { home: compHome, away: compAway };
+                        } catch(e) { return { home: homeTS.total, away: awayTS.total }; }
+                    })();
+                    // Composite-aware Mode B winner — used when R_INCONSISTENT fires
+                    const modeBWinnerComposite = _compScores.home >= _compScores.away ? homeTeam : awayTeam;
+
+
+                    // ── MERGED V4 ENGINE — updated rules from 163-game audit (Mar 26 2026) ──
+                    // Mode B overall 52.8% vs Mode A 43.6% — B stronger in most disagreement scenarios
+                    // DISAGREEMENT-ONLY accuracy (65 disagreements):
+                    //   Conv A>=85% + disagree  → B wins 40/65 (62%) vs A 25/65 (38%) — STRONGEST signal
+                    //   Margin >=100 + disagree → A wins 7/12 (58%) vs B 5/12 (42%) — weak A edge only
+                    //   Margin <30  + disagree  → B wins 13/19 (68%) vs A 6/19 (32%) — strong B
+                    //   Medium margin + disagree → B wins (B 56% in both 20-50 and 51-100 ranges)
+                    // Conviction check runs BEFORE margin check — key fix
                     let mergedWinner, mergedRule, mergedRuleTag;
                     const modesAgree = modeAWinner !== null && modeAWinner === modeBWinner;
                     if (!modeAWinner) {
-                        // Mode A inconsistent (flips on order reversal) → use Mode B, flag dissent
-                        mergedWinner  = modeBWinner;
+                        // Mode A inconsistent (order-dependent) → use composite Mode B
+                        // Composite adds DNA/master bonuses to align with Tale of the Tape result
+                        mergedWinner  = modeBWinnerComposite;
                         mergedRule    = 'R_INCONSISTENT';
                         mergedRuleTag = '〰️ A inconsistent→B';
                     } else if (modesAgree) {
+                        // Both modes agree → highest reliability
                         mergedWinner  = modeAWinner;
                         mergedRule    = 'AGREE';
-                        mergedRuleTag = null; // no special tag needed when they agree
+                        mergedRuleTag = null;
+                    } else if (modeAConv >= 85) {
+                        // Rule 1 (NEW): High Mode A conviction + disagree → USE B
+                        // 163-game data: B wins 40/65 (62%) vs A 25/65 (38%) when A>=85% and modes split
+                        // Strong cipher match when B disagrees means B's raw tape signal is right
+                        mergedWinner  = modeBWinner;
+                        mergedRule    = 'R1:B_CONV';
+                        mergedRuleTag = '🔬 HighConv→B';
                     } else if (margin >= 100) {
-                        mergedWinner  = modeAWinner; // Rule 1: large margin → A (86%)
-                        mergedRule    = 'R1:A';
+                        // Rule 2: Large B tape margin + low conviction → slight A edge (58% vs 42%)
+                        // Weak signal — conviction rule above handles the strong-conviction sub-case
+                        mergedWinner  = modeAWinner;
+                        mergedRule    = 'R2:A';
                         mergedRuleTag = '📐 Margin≥100→A';
                     } else if (margin < 30) {
-                        mergedWinner  = modeBWinner; // Rule 2: small margin → B (63%)
-                        mergedRule    = 'R2:B';
+                        // Rule 3: Small margin + disagree → B (68% vs 32% — strong signal)
+                        mergedWinner  = modeBWinner;
+                        mergedRule    = 'R3:B';
                         mergedRuleTag = '〰️ Margin<30→B';
-                    } else if (modeAConv >= 96) {
-                        mergedWinner  = modeBWinner; // Rule 4: extreme conviction → B (33% > 29%)
-                        mergedRule    = 'R4:B';
-                        mergedRuleTag = '⚡ Conv96+→B';
                     } else {
-                        mergedWinner  = modeAWinner; // Rule 3: medium margin, A default (50% > 46%)
-                        mergedRule    = 'R3:A';
-                        mergedRuleTag = '📊 Med→A';
+                        // Rule 4: Medium margin (30-99), low conviction → B default
+                        // 163-game data: B 56% in both 20-50 and 51-100 margin ranges
+                        mergedWinner  = modeBWinner;
+                        mergedRule    = 'R4:B_MED';
+                        mergedRuleTag = '📊 Med→B';
                     }
 
                     // The displayed V4 winner is now the merged pick
@@ -21433,10 +22408,10 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     const _dnaDelta = _dnaWinScore - _dnaLoseScore;
                     const maxExpectedMargin = 120;
                     const tapeConfPct = Math.min(99, Math.round(50 + (margin/maxExpectedMargin)*49));
-                    const tapeConf   = margin===0 ? 'EVEN' :
-                                       margin<=45 ? 'SLIGHT' :
-                                       margin<=70 ? 'MODERATE' :
-                                       margin<=90 ? 'CLEAR' : 'DOMINANT';
+                    const tapeConf   = margin===0 ? 'EVEN VW' :
+                                       margin<=45 ? 'SLIGHT VW' :
+                                       margin<=70 ? 'MODERATE VW' :
+                                       margin<=90 ? 'CLEAR VW' : 'DOMINANT VW';
 
                     // V2 winner from statistical model
                     const v2wp = gameData.wp;
@@ -21557,6 +22532,38 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         _sidebarTrapResult = computeGameTrapTier(homeTeam, awayTeam, gameSport||currentSport, gameTime, _sidebarRank);
                     } catch(e) {}
 
+                    // ── Warning badge penalties applied to confidence ──
+                    // Contradictory signals must reduce blendedPct — cannot show 99% with LOSER badge
+                    const _trapTier = _sidebarTrapResult.tier || null;
+                    // Check R4 WARN: winner has Root 4 dominant AND R4 is a VW loser root
+                    const _r4WarnActive = (function(){
+                        try {
+                            var _parts = tapeWinner.trim().split(/\s+/);
+                            var _vars = [tapeWinner, _parts[_parts.length-1]||tapeWinner,
+                                         _parts[0]||tapeWinner, _parts.map(function(p){return p[0]||'';}).join('').toUpperCase()];
+                            var _r4count = 0;
+                            _vars.forEach(function(v){
+                                Object.values(CIPHERS).forEach(function(fn){
+                                    if(calculateDigitalRoot(fn(v)).root === 4) _r4count++;
+                                });
+                            });
+                            if (_r4count < 3) return false;
+                            var _allVW_r4 = calculateAllCalendarsVW(gameTime || new Date());
+                            return Object.values(_allVW_r4).some(function(vw){ return vw.dpm===4||vw.un===4; });
+                        } catch(e) { return false; }
+                    })();
+                    // Check vptDnaLoser (winner's root is confirmed loser in VPT+DNA)
+                    const _vptDnaLoserActive = _vptRoots && _dnaRoots &&
+                        (typeof checkVPTDNAAlignment === 'function') &&
+                        !!checkVPTDNAAlignment(tapeWinner, _vptRoots, _dnaRoots) === false &&
+                        !!checkVPTDNAAlignment(tapeLosing, _vptRoots, _dnaRoots) !== false;
+                    // Apply penalties
+                    if (_trapTier === 1)       blendedPct = Math.max(51, blendedPct - 8);   // VOID TRAP
+                    if (_trapTier === 2)       blendedPct = Math.max(51, blendedPct - 5);   // T2 trap
+                    if (_vptDnaLoserActive)   blendedPct = Math.max(51, blendedPct - 12);  // dual-system loser
+                    if (_r4WarnActive)         blendedPct = Math.max(51, blendedPct - 6);   // R4 loser anchor
+
+
                     // Compute skip-pattern pick for this game
                     const _skipResult = computeSkipPatternPick(homeTeam, awayTeam, gameSport||currentSport);
 
@@ -21591,6 +22598,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     } catch(e) {}
 
                     predictions.push({
+                        gameId: gameId,
                         homeTeam, awayTeam, gameTime,
                         isLive: gameData.data && gameData.data.isLive === true,
                         tapeWinner, tapeLosing, winnerTS, loserTS,
@@ -21664,13 +22672,13 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     '<p style="color:#8b92a7;font-size:13px;">No pregame games available</p></div>';
             }
 
-            // ── Sort: game date ASC → game time ASC → tape confidence DESC ──
+            // ── Sort: start time ASC only — matches V2 card order (ESPN API order) ──
             predictions.sort((a,b) => {
-                const dayA = a.gameTime.toDateString();
-                const dayB = b.gameTime.toDateString();
-                if (dayA !== dayB) return a.gameTime - b.gameTime;
-                if (a.gameTime.getTime() !== b.gameTime.getTime()) return a.gameTime - b.gameTime;
-                return b.margin - a.margin;
+                const tA = a.gameTime ? a.gameTime.getTime() : 0;
+                const tB = b.gameTime ? b.gameTime.getTime() : 0;
+                if (tA !== tB) return tA - tB;
+                // Same start time: use game ID string sort to match ESPN order
+                return (a.gameId || '').localeCompare(b.gameId || '');
             });
 
             const today = new Date().toDateString();
@@ -21912,7 +22920,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                             '</div>' +
                         '</div>' +
                         '<div style="text-align:right;flex-shrink:0;margin-left:8px;">' +
-                            '<div class="chronos-tip" data-tip="Blended confidence combining V4 tape VW margin, V2 model alignment, and Vegas alignment. Triple Lock +12%, V2+V4 Agree +6%, V2+V4 Split -8%." style="font-size:15px;font-weight:800;color:'+marginColor+';cursor:help;">' + p.tapeConfPct + '%</div>' +
+                            '<div class="chronos-tip" data-tip="VW Resonance Score: vibrational alignment strength. NOT win probability. Penalties: VOID TRAP -8%, VPT+DNA LOSER -12%, R4 WARN -6%. Bonuses: QUAD LOCK +25%, Triple Lock +12%, V2+V4 Agree +6%, V2+V4 Split -8%." style="font-size:15px;font-weight:800;color:'+marginColor+';cursor:help;">' + p.tapeConfPct + '%</div>' +
                             '<div style="font-size:9px;color:'+marginColor+';margin-top:1px;">' + p.tapeConf + '</div>' +
                         '</div>' +
                     '</div>' +
@@ -21932,6 +22940,28 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                         alignBadges + v4badge + v4OverrideBadge +
                     '</div>' +
                     trapBadgeHtml +
+                (function(){
+                    // Name variation WARN: check if predicted winner has root 4 as dominant variation
+                    try {
+                        var _warnName = p.tapeWinner;
+                        if (!_warnName) return '';
+                        var _parts = _warnName.trim().split(/\s+/);
+                        var _vars = [_warnName, _parts[_parts.length-1]||_warnName, _parts[0]||_warnName,
+                                     _parts.map(function(p){return p[0]||'';}).join('').toUpperCase()];
+                        var _r4count = 0;
+                        _vars.forEach(function(v){
+                            Object.values(CIPHERS).forEach(function(fn){
+                                if(calculateDigitalRoot(fn(v)).root === 4) _r4count++;
+                            });
+                        });
+                        var _allVW_warn = calculateAllCalendarsVW(new Date());
+                        var _is4loser = Object.values(_allVW_warn).some(function(vw){ return vw.dpm===4||vw.un===4; });
+                        if (_r4count >= 3 && _is4loser) {
+                            return '<div style="margin-top:4px;"><span class="chronos-tip" data-tip="NAME VARIATION ROOT 4 WARNING: ' + _warnName.split(' ').pop() + ' has R4 appearing ' + _r4count + '+ times across name variations. Root 4 is a known loser anchor in the current VW. This is a high-risk pick — review carefully before betting." style="font-size:10px;font-weight:800;color:#ef4444;background:#ef444411;border:1px solid #ef444433;border-radius:4px;padding:2px 8px;cursor:help;">⚠️ R4 WARN: ' + _warnName.split(' ').pop() + '</span></div>';
+                        }
+                        return '';
+                    } catch(e){ return ''; }
+                })() +
                     (function(){
                         // VPT+DNA Alignment badge
                         try {
@@ -22652,6 +23682,228 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             };
         }
 
+        // ============================================
+        // MLB V2 MODEL — ERA/FIP/wRC+ efficiency ratings
+        // ============================================
+        function calculateMLBModel(data, homePriors, awayPriors) {
+            // League average constants (2024/2025 MLB)
+            const LG_RUNS_PER_INNING = 0.506;  // ~4.55 R/9
+            const LG_ERA_PLUS        = 100;
+            const LG_FIP             = 4.20;
+            const LG_BULLPEN_ERA     = 4.10;
+            const LG_OBP             = 0.318;
+            const LG_SLG             = 0.413;
+            const HOME_ADV_RUNS      = 0.12;   // ~0.12 extra runs at home per 9 innings
+
+            // ── Offensive efficiency ──
+            // Composite offensive rating: combines OBP (50%), SLG (30%), BABIP luck-normalize (20%)
+            function offRating(p) {
+                const obpFactor  = ((p.obp  || LG_OBP)  - LG_OBP)  * 8.0;   // each +.010 OBP ≈ +0.08 R/inn
+                const slgFactor  = ((p.slg  || LG_SLG)  - LG_SLG)  * 4.0;
+                const babipAdj   = ((p.babip || 0.295)  - 0.295)    * 2.0;   // luck normalize
+                return (p.runs_per_inning || LG_RUNS_PER_INNING) + obpFactor + slgFactor + babipAdj;
+            }
+
+            // ── Pitching quality (ERA+ + FIP blend) ──
+            function pitchRating(p) {
+                const eraFactor  = ((p.era_plus || LG_ERA_PLUS) - LG_ERA_PLUS) / 100 * 0.35;
+                const fipFactor  = (LG_FIP - (p.fip || LG_FIP)) * 0.08;
+                return eraFactor + fipFactor;
+            }
+
+            // ── Bullpen quality (late-game critical) ──
+            function bullpenRating(p) {
+                return (LG_BULLPEN_ERA - (p.bullpen_era || LG_BULLPEN_ERA)) * 0.06;
+            }
+
+            // ── Compute expected runs per 9 innings ──
+            const homeOff      = offRating(homePriors) * 9;
+            const awayOff      = offRating(awayPriors) * 9;
+            const homePitch    = pitchRating(homePriors);
+            const awayPitch    = pitchRating(awayPriors);
+            const homeBullpen  = bullpenRating(homePriors);
+            const awayBullpen  = bullpenRating(awayPriors);
+
+            // Expected runs scored BY home = home offense - away pitching - away bullpen
+            const homeExpRuns  = Math.max(1.5, homeOff + (awayPitch + awayBullpen) * -9 + HOME_ADV_RUNS);
+            // Expected runs scored BY away = away offense - home pitching - home bullpen
+            const awayExpRuns  = Math.max(1.5, awayOff + (homePitch + homeBullpen) * -9);
+
+            // ── Model spread (home perspective, negative = home favored) ──
+            const modelSpread  = -(homeExpRuns - awayExpRuns);
+            const modelTotal   = homeExpRuns + awayExpRuns;
+
+            console.log('⚾ MLB Model:', {
+                homeExp: homeExpRuns.toFixed(2),
+                awayExp: awayExpRuns.toFixed(2),
+                modelSpread: modelSpread.toFixed(2),
+                modelTotal:  modelTotal.toFixed(1)
+            });
+
+            return {
+                modelSpread:    modelSpread,
+                modelTotal:     modelTotal,
+                expectedScores: { home: homeExpRuns, away: awayExpRuns },
+                usingMLBModel:  true,
+                homePitchRating: homePitch,
+                awayPitchRating: awayPitch
+            };
+        }
+
+        // ============================================
+        // NHL V2 MODEL — Monte Carlo shot simulation
+        // ============================================
+        function calculateHockeyModel(data, homePriors, awayPriors) {
+            // ── League-average constants (2024-25 NHL) ──
+            const LG_GOALS_PER_SHOT  = 0.095;   // goals per shot attempt at 5v5
+            const LG_SHOTS_PER_60    = 30.0;    // shots per team per 60 min
+            const LG_PP_PCT          = 20.0;    // power play %
+            const LG_PK_PCT          = 80.0;    // penalty kill %
+            const LG_SV_PCT          = 0.906;   // save percentage
+            const LG_CF_PCT          = 50.0;    // Corsi For % (shot share)
+            const LG_GF_60           = 2.80;    // goals for per 60 min
+            const LG_GA_60           = 2.80;    // goals against per 60 min
+            const PENALTIES_PER_TEAM = 3.0;     // avg penalties drawn per game per team
+            const HOME_ADV_GOALS     = 0.10;    // home ice advantage in goals
+            const OT_FREQUENCY       = 0.24;    // ~24% of NHL games go to OT
+            const SIMULATIONS        = 10000;   // Monte Carlo iterations
+
+            // ── Extract priors with fallbacks ──
+            function p(priors, key, fallback) {
+                var v = priors[key];
+                return (v != null && isFinite(v)) ? v : fallback;
+            }
+
+            var homeGPS    = p(homePriors, 'points_per_drive', LG_GOALS_PER_SHOT);
+            var awayGPS    = p(awayPriors, 'points_per_drive', LG_GOALS_PER_SHOT);
+            var homePace   = p(homePriors, 'pace', LG_SHOTS_PER_60);
+            var awayPace   = p(awayPriors, 'pace', LG_SHOTS_PER_60);
+            var homeCF     = p(homePriors, 'cf_pct', LG_CF_PCT) / 100;
+            var awayCF     = 1 - homeCF; // zero-sum: one team's Corsi is the other's
+
+            // PP/PK: when home team draws a penalty, home PP vs away PK
+            var homePP     = p(homePriors, 'pp_pct', LG_PP_PCT) / 100;
+            var awayPP     = p(awayPriors, 'pp_pct', LG_PP_PCT) / 100;
+            var homePK     = p(homePriors, 'pk_pct', LG_PK_PCT) / 100;
+            var awayPK     = p(awayPriors, 'pk_pct', LG_PK_PCT) / 100;
+
+            // SV% adjusts effective goals-against (opponent's GPS is reduced by goalie)
+            var homeSV     = p(homePriors, 'sv_pct', LG_SV_PCT);
+            var awaySV     = p(awayPriors, 'sv_pct', LG_SV_PCT);
+
+            // ── Per-shot goal probability accounting for opposing goalie ──
+            // Effective shot-to-goal = attacker_GPS × (1 - opponent_SV_bonus)
+            var svBonusHome = (homeSV - LG_SV_PCT) * 2.0; // home goalie save bonus above avg
+            var svBonusAway = (awaySV - LG_SV_PCT) * 2.0;
+            var homeGoalProb = homeGPS * (1 - svBonusAway); // home offense vs away goalie
+            var awayGoalProb = awayGPS * (1 - svBonusHome); // away offense vs home goalie
+            homeGoalProb = Math.max(0.04, Math.min(0.18, homeGoalProb));
+            awayGoalProb = Math.max(0.04, Math.min(0.18, awayGoalProb));
+
+            // ── Expected PP goals per game ──
+            // Each team draws ~3 penalties/game → opponent gets 3 PP opportunities
+            // PP goal = PP% × opponent draws × efficiency
+            var homePPGoals = PENALTIES_PER_TEAM * homePP * 1.0;  // home PP when away takes penalty
+            var awayPPGoals = PENALTIES_PER_TEAM * awayPP * 1.0;  // away PP when home takes penalty
+            // PK adjustment: reduce opponent PP goals by our PK quality vs league avg
+            homePPGoals *= (homePK / LG_PK_PCT * 100) / 100;  // our PK limits their scoring, not PP
+            // Actually: home scores on PP = PENALTIES_per_team × home_PP%; away PK reduces this
+            // Recalculate cleanly:
+            var homePPAdj  = PENALTIES_PER_TEAM * homePP;   // home PP opportunities → goals
+            var awayPPAdj  = PENALTIES_PER_TEAM * awayPP;   // away PP opportunities → goals
+            // Reduce each by opponent's PK vs average
+            var homePKBonus = (homePK / 100 - LG_PK_PCT / 100);  // positive = above avg PK
+            var awayPKBonus = (awayPK / 100 - LG_PK_PCT / 100);
+            var homePPGoalsFinal = Math.max(0, homePPAdj - homePPAdj * awayPKBonus * 2);
+            var awayPPGoalsFinal = Math.max(0, awayPPAdj - awayPPAdj * homePKBonus * 2);
+
+            // ── Monte Carlo simulation ──
+            var homeWins = 0, awayWins = 0, otGames = 0;
+            var totalHomeGoals = 0, totalAwayGoals = 0;
+
+            // Total shots attempted at 5v5 = pace × (60 - PP_time) / 60 ≈ pace × 0.88
+            var homeShots5v5 = Math.round(homePace * homeCF * 0.88);
+            var awayShots5v5 = Math.round(awayPace * awayCF * 0.88);
+
+            for (var sim = 0; sim < SIMULATIONS; sim++) {
+                var homeG = 0, awayG = 0;
+
+                // 5v5 goal simulation (Poisson-approximated via Bernoulli trials)
+                for (var s = 0; s < homeShots5v5; s++) {
+                    if (Math.random() < homeGoalProb) homeG++;
+                }
+                for (var s = 0; s < awayShots5v5; s++) {
+                    if (Math.random() < awayGoalProb) awayG++;
+                }
+
+                // Add PP goals (Poisson with lambda = expected PP goals)
+                // Simulate as Poisson: P(k) using inverse transform
+                homeG += poissonSample(homePPGoalsFinal);
+                awayG += poissonSample(awayPPGoalsFinal);
+
+                // Home ice advantage
+                if (Math.random() < HOME_ADV_GOALS) homeG++;
+
+                // OT: ~24% chance if tied after regulation
+                if (homeG === awayG) {
+                    if (Math.random() < OT_FREQUENCY) {
+                        // Sudden death OT: home wins slightly more often due to ice advantage
+                        if (Math.random() < 0.52) homeG++; else awayG++;
+                        otGames++;
+                    } else {
+                        // Still tied → shootout (home wins ~50%)
+                        if (Math.random() < 0.50) homeG++; else awayG++;
+                    }
+                }
+
+                totalHomeGoals += homeG;
+                totalAwayGoals += awayG;
+                if (homeG > awayG) homeWins++; else awayWins++;
+            }
+
+            var modelWP        = homeWins / SIMULATIONS;
+            var avgHomeGoals   = totalHomeGoals / SIMULATIONS;
+            var avgAwayGoals   = totalAwayGoals / SIMULATIONS;
+            var modelTotal     = avgHomeGoals + avgAwayGoals;
+            var modelSpread    = -(avgHomeGoals - avgAwayGoals); // negative = home favored
+
+            // Blend with Vegas total if divergence > 1.0 goal
+            if (data.vegasTotal && Math.abs(modelTotal - data.vegasTotal) > 1.0) {
+                modelTotal = (modelTotal + data.vegasTotal) / 2;
+            }
+
+            console.log('🏒 Hockey Monte Carlo:', {
+                homeWP:    (modelWP * 100).toFixed(1) + '%',
+                avgHomeG:  avgHomeGoals.toFixed(2),
+                avgAwayG:  avgAwayGoals.toFixed(2),
+                spread:    modelSpread.toFixed(2),
+                total:     modelTotal.toFixed(1),
+                otPct:     (otGames / SIMULATIONS * 100).toFixed(1) + '%'
+            });
+
+            return {
+                modelWP:        modelWP,
+                modelSpread:    modelSpread,
+                modelTotal:     modelTotal,
+                expectedScores: { home: avgHomeGoals, away: avgAwayGoals },
+                otFrequency:    otGames / SIMULATIONS,
+                usingHockeyMonteCarlo: true,
+                modelVersion:   'V2-NHL-MC'
+            };
+        }
+
+        // ── Poisson sampler (for PP goal simulation) ──
+        function poissonSample(lambda) {
+            if (lambda <= 0) return 0;
+            var L = Math.exp(-lambda), k = 0, p = 1;
+            do { k++; p *= Math.random(); } while (p > L);
+            return k - 1;
+        }
+
+
+
+
+
         function calculateGameWP(data, sportConfig, intelligence) {
             const calculator = new MonteCarloWPCalculator(sportConfig);
             
@@ -22670,7 +23922,7 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             
             // Vegas-implied priors now have sport-specific bounds (1.05-1.22 for NBA, etc.)
             // This gives team variance while preventing the 250+ total inflation
-            console.log(`📊 Team PPP: ${data.homeTeam} = ${homePriors.points_per_drive.toFixed(3)}, ${data.awayTeam} = ${awayPriors.points_per_drive.toFixed(3)}`);
+            if (homePriors.points_per_drive != null && awayPriors.points_per_drive != null) console.log(`📊 Team PPP: ${data.homeTeam} = ${homePriors.points_per_drive.toFixed(3)}, ${data.awayTeam} = ${awayPriors.points_per_drive.toFixed(3)}`);
             
             // =====================================================
             // APPLY INJURY IMPACTS TO PPD
@@ -22678,6 +23930,9 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
             // =====================================================
             if (intelligence?.injuries) {
                 // Store original PPD for display
+                // Safety: MLB priors use runs_per_inning — ensure points_per_drive exists
+                if (homePriors.points_per_drive == null) homePriors.points_per_drive = homePriors.runs_per_inning || 0.506;
+                if (awayPriors.points_per_drive == null) awayPriors.points_per_drive = awayPriors.runs_per_inning || 0.506;
                 homePriors.originalPPD = homePriors.points_per_drive;
                 awayPriors.originalPPD = awayPriors.points_per_drive;
                 
@@ -22838,6 +24093,42 @@ var DNA_COMP_T=_obsComp.targets.slice(),DNA_COMP_L=_obsComp.losers.slice();
                     wpResult.usingModelRatings = false;
                     
                     console.log(`✅ Basketball Model: Spread=${basketballModel.modelSpread.toFixed(1)} (Vegas: ${data.spread}), Total=${basketballModel.modelTotal.toFixed(1)} (Vegas: ${data.vegasTotal || 'N/A'})${usingFallback ? ' [FALLBACK PRIORS]' : ''}`);
+                } else if (!wpResult && currentSport === 'nhl') {
+                    // ── NHL V2 MODEL — Monte Carlo shot simulation ──
+                    console.log(`🏒 NHL V2 Monte Carlo - ${data.awayTeam} @ ${data.homeTeam}`);
+                    const hockeyModel = calculateHockeyModel(data, homePriors, awayPriors);
+                    // Blend total with Vegas if divergence > 1 goal (already done inside function)
+                    // Convert Monte Carlo WP to spread for consistency with rest of pipeline
+                    const hockeySpread = hockeyModel.modelSpread;
+                    wpResult = calculator.calculatePregameWP(hockeySpread);
+                    // Override WP with Monte Carlo result (more accurate than sigmoid from spread)
+                    wpResult.wp = hockeyModel.modelWP;
+                    wpResult.predictedSpread = hockeySpread;
+                    wpResult.predictedTotal  = hockeyModel.modelTotal;
+                    wpResult.modelValues     = hockeyModel;
+                    wpResult.usingModelRatings = true;
+                    wpResult.modelVersion    = 'V2-NHL-MC';
+                    if (data.spread !== null && Math.abs(hockeySpread - data.spread) >= 1.5) {
+                        wpResult.requiresManualReview = true;
+                        console.log(`⚠️ NHL REVIEW: Model-Vegas diff = ${Math.abs(hockeySpread - data.spread).toFixed(2)} goals`);
+                    }
+                    console.log(`🏒 NHL: Spread=${hockeySpread.toFixed(2)}, Total=${hockeyModel.modelTotal.toFixed(1)}, WP=${(hockeyModel.modelWP*100).toFixed(1)}%`);
+                } else if (!wpResult && currentSport === 'mlb') {
+                    // ── MLB V2 MODEL — ERA/FIP/OBP/SLG efficiency ratings ──
+                    console.log(`⚾ MLB V2 MODEL - ${data.awayTeam} @ ${data.homeTeam}`);
+                    const mlbModel = calculateMLBModel(data, homePriors, awayPriors);
+                    if (data.vegasTotal && Math.abs(mlbModel.modelTotal - data.vegasTotal) > 2.5) {
+                        mlbModel.modelTotal = (mlbModel.modelTotal + data.vegasTotal) / 2;
+                    }
+                    wpResult = calculator.calculatePregameWP(mlbModel.modelSpread);
+                    wpResult.predictedSpread = mlbModel.modelSpread;
+                    wpResult.predictedTotal  = mlbModel.modelTotal;
+                    wpResult.modelValues     = mlbModel;
+                    wpResult.usingModelRatings = true;
+                    wpResult.modelVersion    = 'V2-MLB';
+                    if (data.spread !== null && Math.abs(mlbModel.modelSpread - data.spread) >= 2.5) {
+                        wpResult.requiresManualReview = true;
+                    }
                 } else if (!wpResult) {
                     // For football, use Vegas spread (for now)
                     console.log(`VEGAS DERIVED - ${data.awayTeam} @ ${data.homeTeam}`);
@@ -23667,11 +24958,74 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
 }
         function renderGameCard(data, wpResult, sportConfig, intelligence) {
             const wp = wpResult.wp;
-            // P badge: locked to PRE-GAME stored prediction — never flips during live game
-            const _storedPred = (typeof accuracyTracker !== 'undefined') ? accuracyTracker.predictions.get(data.id) : null;
-            const _pregameHomeWP = _storedPred ? (_storedPred.predictedHomeWP || 50) : (wp * 100);
-            const _homeIsPredWinner = _pregameHomeWP > 50;
+            // P badge: frozen at pregame value — never flips during live game
+            // For live games: read stored prediction (locked at pregame time)
+            // For pregame: use current wp (same as displayed)
+            const _storedPredP = (typeof accuracyTracker !== 'undefined') ? accuracyTracker.predictions.get(data.id) : null;
+            const _pregameWP = (_storedPredP && data.isLive) ? (_storedPredP.predictedHomeWP || 50) : (wp * 100);
+            const _homeIsPredWinner = _pregameWP >= 50;
             const confidenceInfo = getConfidenceLevel(wpResult);
+
+            // ── BET SIGNAL — tri-color confidence tier for actionable betting ──
+            const _betSignal = (function() {
+                if (data.isLive) return null; // live games: no bet signal
+                var v2WP = wp * 100;
+                // V4 conviction: read tapeConfPct (the VW resonance %) shown on the sidebar card
+                // Priority: tapeConfFinal (computed at sidebar render) > tapeConfPct (stored) > v4ConvictionPct (Mode A cipher)
+                // v4ConvictionPct is Mode A cipher conviction (often 0 for tape sports) — NOT what the sidebar shows
+                var _sp4 = (typeof accuracyTracker !== 'undefined') ? accuracyTracker.predictions.get(data.id) : null;
+                var v4Conv = 0;
+                var _sMatch = null; // sidebar pool match — used for v4FavsHome too
+                // Priority: sidebar pool tapeConfPct (live, post-penalty blendedPct) > stored > cipher
+                try {
+                    var _sPool = window._sidebarPredictionsBySport && window._sidebarPredictionsBySport[currentSport];
+                    if (_sPool) {
+                        _sMatch = _sPool.find(function(p){ return p.gameId === data.id; });
+                        if (_sMatch && _sMatch.tapeConfPct) v4Conv = _sMatch.tapeConfPct;
+                    }
+                } catch(e) {}
+                // Fallback: stored prediction fields
+                if (!v4Conv && _sp4) {
+                    v4Conv = _sp4.tapeConfFinal || _sp4.tapeConfPct || _sp4.v4ConvictionPct || _sp4.v4Conviction || 0;
+                }
+                var v2Passes  = v2WP >= 60 || v2WP <= 40;
+                var v4Passes  = v4Conv >= 85;
+                var vegasPasses = data.spread !== null && Math.abs(data.spread) >= 2;
+                // Determine predicted winner direction
+                var v2FavsHome  = v2WP >= 60;
+                var v2FavsAway  = v2WP <= 40;
+                // V4 winner: prefer sidebar pool tapeWinner (current merged pick) over stored v4Winner
+                // stored v4Winner is Mode A only; tapeWinner is the merged result
+                var v4FavsHome = (v2WP >= 50); // safe default
+                try {
+                    if (_sMatch && _sMatch.tapeWinner) {
+                        v4FavsHome = (_sMatch.tapeWinner === data.homeTeam);
+                    } else if (_sp4 && _sp4.v4Winner) {
+                        v4FavsHome = (_sp4.v4Winner === data.homeTeam);
+                    }
+                } catch(e) {}
+                var vegasFavsHome = data.spread !== null && data.spread < 0;
+                var allAgree = v2FavsHome !== undefined && v4FavsHome !== undefined &&
+                    v2FavsHome === v4FavsHome && (data.spread === null || vegasFavsHome === v2FavsHome);
+                var v2v4Agree = (v2FavsHome === v4FavsHome);
+
+                if (v2Passes && v4Passes && v2v4Agree && allAgree) {
+                    return { tier: 'GREEN', label: '🟢 BET', detail: 'V2 ' + v2WP.toFixed(0) + '% · V4 ' + v4Conv + '% · All agree',
+                        color: '#10b981', bg: '#0d2010', border: '#10b98155' };
+                } else if ((v2Passes && v4Passes && !v2v4Agree)) {
+                    return { tier: 'RED', label: '🔴 SPLIT — NO BET', detail: 'V2 ' + v2WP.toFixed(0) + '% vs V4 ' + v4Conv + '% pick opposite winners',
+                        color: '#ef4444', bg: '#200d0d', border: '#ef444455' };
+                } else if (v2Passes && v2v4Agree) {
+                    return { tier: 'YELLOW', label: '🟡 WATCH', detail: 'V2 strong (' + v2WP.toFixed(0) + '%) · V4 ' + (v4Passes ? 'passes' : 'below threshold (' + v4Conv + '%)'),
+                        color: '#f59e0b', bg: '#1a1200', border: '#f59e0b55' };
+                } else if (v4Passes && v2v4Agree) {
+                    return { tier: 'YELLOW', label: '🟡 WATCH', detail: 'V4 strong (' + v4Conv + '%) · V2 ' + (v2Passes ? 'passes' : 'marginal (' + v2WP.toFixed(0) + '%)'),
+                        color: '#f59e0b', bg: '#1a1200', border: '#f59e0b55' };
+                } else {
+                    return { tier: 'GRAY', label: '⚪ MONITOR', detail: 'Below confidence floor — V2 ' + v2WP.toFixed(0) + '% · V4 ' + v4Conv + '%',
+                        color: '#4a5568', bg: '#0d0f14', border: '#2a3142' };
+                }
+            })();
             
             let situation = '';
             if (data.isLive) {
@@ -23727,6 +25081,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                         <div class="confidence-badge ${confidenceInfo.level}">
                             ${confidenceInfo.label} CONFIDENCE
                         </div>
+                        ${_betSignal ? `<div style="margin-top:6px;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:800;display:inline-block;color:${_betSignal.color};background:${_betSignal.bg};border:1px solid ${_betSignal.border};cursor:help;" title="${_betSignal.detail}">${_betSignal.label}</div>` : ''}
                     </div>
                     ${(() => {
                         // Generate intel badges
@@ -23823,7 +25178,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                             <div class="team ${!data.isLive || data.possession !== 'away' ? '' : 'has-possession'}">
                                 <div class="team-name">
                                     ${!data.isLive || data.possession !== 'away' ? '' : `<span class="possession-indicator">${sportConfig.possessionIndicator}</span>`}
-                                    ${data.awayTeam}${(sportConfig.sport==='mlb'||currentSport==='mlb')&&data.awayRecord?'<span style="font-size:9px;color:#4a5568;margin-left:4px;">('+data.awayRecord+')</span>':''}
+                                    ${data.awayTeam}${data.awayRecord?'<span style="font-size:11px;color:#8b92a7;margin-left:5px;font-weight:500;">('+data.awayRecord+')</span>':''}
                                     ${!_homeIsPredWinner ? '<span style="font-size:9px;color:#10b981;font-weight:800;background:#0d2010;border-radius:2px;padding:0 3px;margin-left:3px;">P</span>' : ''}
                                 </div>
                                 <div class="team-score">${data.isLive ? data.awayScore : '-'}</div>
@@ -23831,7 +25186,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                             <div class="team ${!data.isLive || data.possession !== 'home' ? '' : 'has-possession'}">
                                 <div class="team-name">
                                     ${!data.isLive || data.possession !== 'home' ? '' : `<span class="possession-indicator">${sportConfig.possessionIndicator}</span>`}
-                                    ${data.homeTeam}${(sportConfig.sport==='mlb'||currentSport==='mlb')&&data.homeRecord?'<span style="font-size:9px;color:#4a5568;margin-left:4px;">('+data.homeRecord+')</span>':''}
+                                    ${data.homeTeam}${data.homeRecord?'<span style="font-size:11px;color:#8b92a7;margin-left:5px;font-weight:500;">('+data.homeRecord+')</span>':''}
                                     ${_homeIsPredWinner ? '<span style="font-size:9px;color:#10b981;font-weight:800;background:#0d2010;border-radius:2px;padding:0 3px;margin-left:3px;">P</span>' : ''}
                                 </div>
                                 <div class="team-score">${data.isLive ? data.homeScore : '-'}</div>
@@ -26058,6 +27413,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                 if (!byDay[dk]) byDay[dk] = { all:[], included:[] };
                 byDay[dk].all.push(g);
                 if (excludeMLB && sp==='mlb') return;
+                if (sp==='mlb') { var _gdm=new Date(g.gameDate||0).getTime(); if(_gdm>0&&_gdm<new Date('2026-03-25T00:00:00').getTime()) return; }
                 if (excludeSoccer && sp==='soccer') return;
                 byDay[dk].included.push(g);
             });
@@ -26900,6 +28256,7 @@ function generateGameNotes(data, wpResult, sportConfig, intelligence) {
                 if (p.upsetAlert && _isWinner)       { pts += W.upsetAlert;  reasons.push({t:'⚡ UPSET ALERT',      pts:W.upsetAlert,  col:'#f59e0b'}); }
                 if (p.trustV4 && _isWinner)          { pts += W.trustV4;     reasons.push({t:'🔬 TRUST V4',         pts:W.trustV4,     col:'#f59e0b'}); }
                 if (p.vptDnaAlign && _isWinner)      { pts += W.vptDnaAlign; reasons.push({t:'⚡🧬 VPT+DNA',       pts:W.vptDnaAlign,   col:'#fbbf24'}); }
+                if (p.vptDnaLoser && _isWinner)      { pts -= W.vptDnaAlign; reasons.push({t:'⚠️ VPT+DNA LOSER', pts:-W.vptDnaAlign, col:'#ef4444'}); }
 
                     // DNA VAR (winner = V4 pick)
                     if (_isWinner) {
