@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Chronos-WP Kalshi Setup</title>
+<style>
+body { font-family: monospace; background: #0a0e15; color: #e8e8e8; max-width: 600px; margin: 60px auto; padding: 20px; }
+h2 { color: #fbbf24; }
+label { display: block; color: #8b92a7; font-size: 12px; margin: 20px 0 6px 0; }
+input, textarea { width: 100%; box-sizing: border-box; background: #1a2535; border: 1px solid #2a3142; color: #e8e8e8; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+textarea { height: 200px; resize: vertical; }
+button { margin-top: 24px; background: #fbbf24; color: #0a0e15; border: none; padding: 12px 28px; font-size: 14px; font-weight: 800; border-radius: 4px; cursor: pointer; width: 100%; }
+button:hover { background: #f59e0b; }
+#status { margin-top: 16px; padding: 12px; border-radius: 4px; display: none; font-size: 13px; }
+.ok  { background: #10b98122; border: 1px solid #10b981; color: #10b981; }
+.err { background: #ef444422; border: 1px solid #ef4444; color: #ef4444; }
+pre  { background: #1a2535; padding: 12px; border-radius: 4px; font-size: 11px; overflow-x: auto; color: #a78bfa; }
+</style>
+</head>
+<body>
+<h2>⚡ Chronos-WP Kalshi Setup</h2>
+<p style="color:#4a5568;font-size:12px;">Enter your Kalshi credentials below. This page generates the config file content — copy it into kalshi-config.json.</p>
+
+<label>Key ID</label>
+<input type="text" id="keyId" placeholder="e.g. a952bcbe-ec3b-4b5b-b8f9-...">
+
+<label>Private Key (paste all lines including BEGIN and END)</label>
+<textarea id="privateKey" placeholder="-----BEGIN RSA PRIVATE KEY-----
+MIIEo...
+...
+-----END RSA PRIVATE KEY-----"></textarea>
+
+<button onclick="generate()">Generate kalshi-config.json content</button>
+
+<div id="status"></div>
+<pre id="output" style="display:none"></pre>
+
+<script>
+function generate() {
+    const keyId = document.getElementById('keyId').value.trim();
+    const raw   = document.getElementById('privateKey').value.trim();
+    const status = document.getElementById('status');
+    const output = document.getElementById('output');
+
+    if (!keyId) {
+        status.className='err'; status.style.display='block';
+        status.textContent = 'Key ID is required.'; return;
+    }
+    if (!raw || !raw.includes('BEGIN')) {
+        status.className='err'; status.style.display='block';
+        status.textContent = 'Private key must include -----BEGIN RSA PRIVATE KEY----- line.'; return;
+    }
+
+    // Build the config object — privateKey stays as multiline string
+    const cfg = { keyId: keyId, privateKey: raw };
+    const json = JSON.stringify(cfg, null, 2);
+
+    output.textContent = json;
+    output.style.display = 'block';
+    status.className = 'ok';
+    status.style.display = 'block';
+    status.innerHTML = '✅ Copy everything in the box below and paste it into kalshi-config.json (overwrite the whole file). Then run start-kalshi.bat';
+}
+</script>
+</body>
+</html>

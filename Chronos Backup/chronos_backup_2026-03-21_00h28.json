@@ -1,0 +1,1800 @@
+{
+  "version": "CHRONOS_V4_BACKUP_v1",
+  "exportedAt": "2026-03-21T05:28:00.952Z",
+  "accuracy": {
+    "predictions": [],
+    "results": [
+      [
+        "401810873",
+        {
+          "gameId": "401810873",
+          "espnGameId": "401810873",
+          "timestamp": 1774051303879,
+          "gameDate": 1774051200000,
+          "sport": "nba",
+          "homeTeam": "Houston Rockets",
+          "awayTeam": "Atlanta Hawks",
+          "modelVersion": "V2-Independent",
+          "predictedHomeWP": 56.22006811844671,
+          "predictedSpread": -5.805003304347807,
+          "predictedTotal": 225.9310344827586,
+          "confidence": 9.194996695652193,
+          "volatility": "medium",
+          "gematria": {
+            "awayTG": 5,
+            "homeTG": 5,
+            "universalDay": 6,
+            "lunarDay": 3,
+            "mvs": 16
+          },
+          "v3Status": "STANDARD",
+          "v3Badge": null,
+          "v3Adjustment": {
+            "wpOriginal": 0.6022006811844671,
+            "wpAdjusted": 0.6022006811844671,
+            "wpDelta": 0,
+            "spreadOriginal": -5.805003304347807,
+            "spreadAdjusted": -5.805003304347807,
+            "spreadDelta": 0,
+            "confidenceOriginal": 0.09194996695652194,
+            "confidenceAdjusted": 0.09194996695652194
+          },
+          "v4Winner": "Houston Rockets",
+          "v4Loser": "Atlanta Hawks",
+          "v4Conviction": 88,
+          "v4ConvictionLabel": "🔢 MATRIX SEQUENCE",
+          "v4ConvictionPct": 88,
+          "v4WinnerCalendar": "gregorian",
+          "v4MatchingCalendars": [
+            "gregorian",
+            "ethiopian",
+            "ifc",
+            "ancient_roman"
+          ],
+          "allThreeLock": false,
+          "tripleAlign": true,
+          "upsetAlert": false,
+          "quadLock": false,
+          "trapFlag": "VOID_TRAP",
+          "trapTier": 2,
+          "v4WinnerScore": null,
+          "skipPatternPick": null,
+          "skipPatternMethod": null,
+          "v2v4agree": true,
+          "v4VegasAgree": true,
+          "modesAgree": false,
+          "mergedRule": "R2:B",
+          "winnerVariation": "mascot",
+          "vegasSpread": -2.5,
+          "vegasTotal": 227.5,
+          "actualHomeScore": 117,
+          "actualAwayScore": 95,
+          "status": "COMPLETED",
+          "fetchAttempts": 1,
+          "lastFetchAttempt": 1774060250777,
+          "soccerLeague": null,
+          "homeWon": true,
+          "actualSpread": -22,
+          "actualTotal": 212,
+          "completedAt": 1774060250974,
+          "source": "AUTO_FETCHED",
+          "wpError": 43.77993188155329,
+          "spreadError": 16.194996695652193,
+          "totalError": 13.931034482758605,
+          "beatVegasSpread": true,
+          "homeCoversVegas": true,
+          "awayCoversVegas": false,
+          "pushSpread": false,
+          "v4PickCoveredSpread": true,
+          "v2PickCoveredSpread": true,
+          "beatVegasTotal": true,
+          "actualOver": false,
+          "actualUnder": true,
+          "pushTotal": false,
+          "v4TotalCorrect": null,
+          "v2TotalCorrect": true
+        }
+      ],
+      [
+        "401810874",
+        {
+          "gameId": "401810874",
+          "espnGameId": "401810874",
+          "timestamp": 1774051303892,
+          "gameDate": 1774051200000,
+          "sport": "nba",
+          "homeTeam": "Memphis Grizzlies",
+          "awayTeam": "Boston Celtics",
+          "modelVersion": "V4-Chronos",
+          "predictedHomeWP": 1,
+          "predictedSpread": 15.698992173913041,
+          "predictedTotal": 227.91724137931033,
+          "confidence": 4.514573664596274,
+          "volatility": "low",
+          "gematria": {
+            "awayTG": 3,
+            "homeTG": 7,
+            "universalDay": 6,
+            "lunarDay": 3,
+            "mvs": 16
+          },
+          "v3Status": "POWER_SYNC",
+          "v3Badge": null,
+          "v3Adjustment": {
+            "wpOriginal": 0.24575973788661457,
+            "wpAdjusted": 0.20575973788661456,
+            "wpDelta": -0.04,
+            "spreadOriginal": 15.698992173913041,
+            "spreadAdjusted": 15.698992173913041,
+            "spreadDelta": 0,
+            "confidenceOriginal": 0.04514573664596274,
+            "confidenceAdjusted": 0.04514573664596274
+          },
+          "v4Winner": "Memphis Grizzlies",
+          "v4Loser": "Boston Celtics",
+          "v4Conviction": 88,
+          "v4ConvictionLabel": "🔢 MATRIX SEQUENCE",
+          "v4ConvictionPct": 88,
+          "v4WinnerCalendar": "gregorian",
+          "v4MatchingCalendars": [
+            "gregorian",
+            "ancient_roman",
+            "pure_sol"
+          ],
+          "allThreeLock": false,
+          "tripleAlign": false,
+          "upsetAlert": false,
+          "quadLock": false,
+          "trapFlag": "VOID_TRAP",
+          "trapTier": 3,
+          "v4WinnerScore": null,
+          "skipPatternPick": null,
+          "skipPatternMethod": null,
+          "v2v4agree": false,
+          "v4VegasAgree": false,
+          "modesAgree": true,
+          "mergedRule": "AGREE",
+          "winnerVariation": "full",
+          "vegasSpread": 15.5,
+          "vegasTotal": 230.5,
+          "actualHomeScore": 112,
+          "actualAwayScore": 117,
+          "status": "COMPLETED",
+          "fetchAttempts": 1,
+          "lastFetchAttempt": 1774060251488,
+          "soccerLeague": null,
+          "homeWon": false,
+          "actualSpread": 5,
+          "actualTotal": 229,
+          "completedAt": 1774060251639,
+          "source": "AUTO_FETCHED",
+          "wpError": 1,
+          "spreadError": 10.698992173913041,
+          "totalError": 1.082758620689674,
+          "beatVegasSpread": false,
+          "homeCoversVegas": true,
+          "awayCoversVegas": false,
+          "pushSpread": false,
+          "v4PickCoveredSpread": true,
+          "v2PickCoveredSpread": false,
+          "beatVegasTotal": true,
+          "actualOver": false,
+          "actualUnder": true,
+          "pushTotal": false,
+          "v4TotalCorrect": null,
+          "v2TotalCorrect": true
+        }
+      ],
+      [
+        "401810875",
+        {
+          "gameId": "401810875",
+          "espnGameId": "401810875",
+          "timestamp": 1774051303898,
+          "gameDate": 1774051200000,
+          "sport": "nba",
+          "homeTeam": "Minnesota Timberwolves",
+          "awayTeam": "Portland Trail Blazers",
+          "modelVersion": "V4-Chronos",
+          "predictedHomeWP": 87.05685025977195,
+          "predictedSpread": -15.799494956521741,
+          "predictedTotal": 229.90344827586205,
+          "confidence": 4.485858583850931,
+          "volatility": "low",
+          "gematria": {
+            "awayTG": 9,
+            "homeTG": 3,
+            "universalDay": 6,
+            "lunarDay": 3,
+            "mvs": 18
+          },
+          "v3Status": "POWER_SYNC",
+          "v3Badge": null,
+          "v3Adjustment": {
+            "wpOriginal": 0.7555685025977195,
+            "wpAdjusted": 0.7955685025977195,
+            "wpDelta": 0.04,
+            "spreadOriginal": -15.799494956521741,
+            "spreadAdjusted": -15.799494956521741,
+            "spreadDelta": 0,
+            "confidenceOriginal": 0.04485858583850931,
+            "confidenceAdjusted": 0.04485858583850931
+          },
+          "v4Winner": "Minnesota Timberwolves",
+          "v4Loser": "Portland Trail Blazers",
+          "v4Conviction": 100,
+          "v4ConvictionLabel": "🔑 GOLDEN KEY",
+          "v4ConvictionPct": 100,
+          "v4WinnerCalendar": "gemini_rolling",
+          "v4MatchingCalendars": [
+            "gemini_rolling",
+            "ifc",
+            "gregorian"
+          ],
+          "allThreeLock": false,
+          "tripleAlign": true,
+          "upsetAlert": false,
+          "quadLock": false,
+          "trapFlag": null,
+          "trapTier": null,
+          "v4WinnerScore": null,
+          "skipPatternPick": null,
+          "skipPatternMethod": null,
+          "v2v4agree": true,
+          "v4VegasAgree": true,
+          "modesAgree": false,
+          "mergedRule": "R2:B",
+          "winnerVariation": "mascot",
+          "vegasSpread": -1.5,
+          "vegasTotal": 231.5,
+          "actualHomeScore": 104,
+          "actualAwayScore": 108,
+          "status": "COMPLETED",
+          "fetchAttempts": 2,
+          "lastFetchAttempt": 1774061150774,
+          "soccerLeague": null,
+          "homeWon": false,
+          "actualSpread": 4,
+          "actualTotal": 212,
+          "completedAt": 1774061150896,
+          "source": "AUTO_FETCHED",
+          "wpError": 87.05685025977195,
+          "spreadError": 19.79949495652174,
+          "totalError": 17.903448275862047,
+          "beatVegasSpread": false,
+          "homeCoversVegas": false,
+          "awayCoversVegas": true,
+          "pushSpread": false,
+          "v4PickCoveredSpread": false,
+          "v2PickCoveredSpread": false,
+          "beatVegasTotal": true,
+          "actualOver": false,
+          "actualUnder": true,
+          "pushTotal": false,
+          "v4TotalCorrect": null,
+          "v2TotalCorrect": true
+        }
+      ],
+      [
+        "401810876",
+        {
+          "gameId": "401810876",
+          "espnGameId": "401810876",
+          "timestamp": 1774051303903,
+          "gameDate": 1774054800000,
+          "sport": "nba",
+          "homeTeam": "Denver Nuggets",
+          "awayTeam": "Toronto Raptors",
+          "modelVersion": "V2-Independent",
+          "predictedHomeWP": 70.23868009070277,
+          "predictedSpread": -10.70667313043478,
+          "predictedTotal": 236.35862068965514,
+          "confidence": 6.411425801242237,
+          "volatility": "low",
+          "gematria": {
+            "awayTG": 8,
+            "homeTG": 8,
+            "universalDay": 6,
+            "lunarDay": 3,
+            "mvs": 22
+          },
+          "v3Status": "STANDARD",
+          "v3Badge": null,
+          "v3Adjustment": {
+            "wpOriginal": 0.6823868009070277,
+            "wpAdjusted": 0.6823868009070277,
+            "wpDelta": 0,
+            "spreadOriginal": -10.70667313043478,
+            "spreadAdjusted": -10.70667313043478,
+            "spreadDelta": 0,
+            "confidenceOriginal": 0.06411425801242238,
+            "confidenceAdjusted": 0.06411425801242238
+          },
+          "v4Winner": "Toronto Raptors",
+          "v4Loser": "Denver Nuggets",
+          "v4Conviction": 88,
+          "v4ConvictionLabel": "🔢 MATRIX SEQUENCE",
+          "v4ConvictionPct": 88,
+          "v4WinnerCalendar": "gregorian",
+          "v4MatchingCalendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian"
+          ],
+          "allThreeLock": false,
+          "tripleAlign": false,
+          "upsetAlert": false,
+          "quadLock": false,
+          "trapFlag": "SHORT_CIRCUIT",
+          "trapTier": 3,
+          "v4WinnerScore": null,
+          "skipPatternPick": null,
+          "skipPatternMethod": null,
+          "v2v4agree": false,
+          "v4VegasAgree": false,
+          "modesAgree": true,
+          "mergedRule": "AGREE",
+          "winnerVariation": "mascot",
+          "vegasSpread": -7.5,
+          "vegasTotal": 239.5,
+          "actualHomeScore": 121,
+          "actualAwayScore": 115,
+          "status": "COMPLETED",
+          "fetchAttempts": 1,
+          "lastFetchAttempt": 1774063851685,
+          "soccerLeague": null,
+          "homeWon": true,
+          "actualSpread": -6,
+          "actualTotal": 236,
+          "completedAt": 1774063851830,
+          "source": "AUTO_FETCHED",
+          "wpError": 29.761319909297228,
+          "spreadError": 4.70667313043478,
+          "totalError": 0.35862068965514027,
+          "beatVegasSpread": false,
+          "homeCoversVegas": false,
+          "awayCoversVegas": true,
+          "pushSpread": false,
+          "v4PickCoveredSpread": true,
+          "v2PickCoveredSpread": false,
+          "beatVegasTotal": true,
+          "actualOver": false,
+          "actualUnder": true,
+          "pushTotal": false,
+          "v4TotalCorrect": null,
+          "v2TotalCorrect": true
+        }
+      ],
+      [
+        "401856497",
+        {
+          "gameId": "401856497",
+          "espnGameId": "401856497",
+          "timestamp": 1774059708753,
+          "gameDate": 1774060260000,
+          "sport": "cbb",
+          "homeTeam": "UConn Huskies",
+          "awayTeam": "Furman Paladins",
+          "modelVersion": "V4-Chronos",
+          "predictedHomeWP": 86.70814295207838,
+          "predictedSpread": -21.911153055531813,
+          "predictedTotal": 141.9,
+          "confidence": 3,
+          "volatility": "low",
+          "gematria": {
+            "awayTG": 5,
+            "homeTG": 6,
+            "universalDay": 6,
+            "lunarDay": 3,
+            "mvs": 17
+          },
+          "v3Status": "POWER_SYNC",
+          "v3Badge": null,
+          "v3Adjustment": {
+            "wpOriginal": 0.8270814295207837,
+            "wpAdjusted": 0.8670814295207837,
+            "wpDelta": 0.04,
+            "spreadOriginal": -21.911153055531813,
+            "spreadAdjusted": -21.911153055531813,
+            "spreadDelta": 0,
+            "confidenceOriginal": 0.03,
+            "confidenceAdjusted": 0.03
+          },
+          "v4Winner": "UConn Huskies",
+          "v4Loser": "Furman Paladins",
+          "v4Conviction": 88,
+          "v4ConvictionLabel": "🔢 MATRIX SEQUENCE",
+          "v4ConvictionPct": 88,
+          "v4WinnerCalendar": "gregorian",
+          "v4MatchingCalendars": [
+            "gregorian",
+            "ancient_roman",
+            "gemini_rolling"
+          ],
+          "allThreeLock": true,
+          "tripleAlign": true,
+          "upsetAlert": false,
+          "quadLock": true,
+          "trapFlag": null,
+          "trapTier": null,
+          "v4WinnerScore": null,
+          "skipPatternPick": null,
+          "skipPatternMethod": null,
+          "v2v4agree": true,
+          "v4VegasAgree": true,
+          "modesAgree": true,
+          "mergedRule": "AGREE",
+          "winnerVariation": "abbrev",
+          "vegasSpread": -20.5,
+          "vegasTotal": 134.5,
+          "actualHomeScore": 82,
+          "actualAwayScore": 71,
+          "status": "COMPLETED",
+          "fetchAttempts": 3,
+          "lastFetchAttempt": 1774069120677,
+          "soccerLeague": null,
+          "homeWon": true,
+          "actualSpread": -11,
+          "actualTotal": 153,
+          "completedAt": 1774069121788,
+          "source": "AUTO_FETCHED",
+          "wpError": 13.291857047921624,
+          "spreadError": 10.911153055531813,
+          "totalError": 11.099999999999994,
+          "beatVegasSpread": false,
+          "homeCoversVegas": false,
+          "awayCoversVegas": true,
+          "pushSpread": false,
+          "v4PickCoveredSpread": false,
+          "v2PickCoveredSpread": false,
+          "beatVegasTotal": true,
+          "actualOver": true,
+          "actualUnder": false,
+          "pushTotal": false,
+          "v4TotalCorrect": null,
+          "v2TotalCorrect": true
+        }
+      ]
+    ],
+    "version": "1.0",
+    "savedAt": 1774070278670,
+    "tabId": 1774070277487.7905
+  },
+  "parlays": [
+    {
+      "id": "parlay_1773517907230_6dke",
+      "savedAt": 1773517907230,
+      "tier": "bifurcation",
+      "title": "🔥 Bifurcation Zone",
+      "avgConviction": 85,
+      "picks": [
+        {
+          "winner": "Orlando Magic",
+          "loser": "Miami Heat",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 85,
+          "convictionLabel": "⚡ SPEED INTERCEPT",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1773532800000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Arizona Wildcats",
+          "loser": "Houston Cougars",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 85,
+          "convictionLabel": "⚡ SPEED INTERCEPT",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1773525600000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Colorado Avalanche",
+          "loser": "Winnipeg Jets",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 85,
+          "convictionLabel": "⚡ SPEED INTERCEPT",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1773518400000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Los Angeles Kings",
+          "loser": "New Jersey Devils",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 85,
+          "convictionLabel": "⚡ SPEED INTERCEPT",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1773529200000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Seattle Mariners",
+          "loser": "Los Angeles Angels",
+          "sport": "mlb",
+          "sportEmoji": "⚾",
+          "conviction": 85,
+          "convictionLabel": "⚡ SPEED INTERCEPT",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1773519000000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Boston Red Sox",
+          "loser": "Atlanta Braves",
+          "sport": "mlb",
+          "sportEmoji": "⚾",
+          "conviction": 85,
+          "convictionLabel": "⚡ SPEED INTERCEPT",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1773525900000,
+          "gameId": null,
+          "legResult": "hit"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 4,
+      "legsTotal": 6
+    },
+    {
+      "id": "parlay_1773517924332_kv5u",
+      "savedAt": 1773517924332,
+      "tier": "structural",
+      "title": "🏛️ Structural Lock Parlay #1",
+      "avgConviction": 95,
+      "picks": [
+        {
+          "winner": "Washington Wizards",
+          "loser": "Boston Celtics",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773525600000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Denver Nuggets",
+          "loser": "Los Angeles Lakers",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773534600000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "LA Clippers",
+          "loser": "Sacramento Kings",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773541800000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "St. John's Red Storm",
+          "loser": "UConn Huskies",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773527400000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Duke Blue Devils",
+          "loser": "Virginia Cavaliers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773534600000,
+          "gameId": null,
+          "legResult": "hit"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 3,
+      "legsTotal": 5
+    },
+    {
+      "id": "parlay_1773523533490_nki8",
+      "savedAt": 1773523533490,
+      "tier": "structural",
+      "title": "🏛️ Structural Lock Parlay #2",
+      "avgConviction": 95,
+      "picks": [
+        {
+          "winner": "Minnesota Wild",
+          "loser": "New York Rangers",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773525600000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Toronto Maple Leafs",
+          "loser": "Buffalo Sabres",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773529200000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "San Jose Sharks",
+          "loser": "Montreal Canadiens",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773529200000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Carolina Hurricanes",
+          "loser": "Tampa Bay Lightning",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773529200000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Calgary Flames",
+          "loser": "New York Islanders",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman"
+          ],
+          "gameTime": 1773529200000,
+          "gameId": null,
+          "legResult": "miss"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 2,
+      "legsTotal": 5
+    },
+    {
+      "id": "parlay_1773586054672_oc28",
+      "savedAt": 1773586054672,
+      "tier": "power5",
+      "title": "🎰 5-Leg Power Parlay",
+      "avgConviction": 94,
+      "picks": [
+        {
+          "winner": "Seattle Kraken",
+          "loser": "Florida Panthers",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 100,
+          "convictionLabel": "🔑 GOLDEN KEY",
+          "calendars": [
+            "ancient_roman"
+          ],
+          "gameTime": 1773619200000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Vanderbilt Commodores",
+          "loser": "Arkansas Razorbacks",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "ancient_roman"
+          ],
+          "gameTime": 1773594000000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Dallas Mavericks",
+          "loser": "Cleveland Cavaliers",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 90,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "unc"
+          ],
+          "gameTime": 1773603000000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Detroit Pistons",
+          "loser": "Toronto Raptors",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 90,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "unc"
+          ],
+          "gameTime": 1773603000000,
+          "gameId": null,
+          "legResult": "hit"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 3,
+      "legsTotal": 4
+    },
+    {
+      "id": "parlay_1773606174868_am47",
+      "savedAt": 1773606174868,
+      "tier": "bifurcation",
+      "title": "🔥 Bifurcation Zone",
+      "avgConviction": 94,
+      "picks": [
+        {
+          "winner": "Seattle Kraken",
+          "loser": "Florida Panthers",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 100,
+          "convictionLabel": "🔑 GOLDEN KEY",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773619200000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Philadelphia 76ers",
+          "loser": "Portland Trail Blazers",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 97,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773612000000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "New York Knicks",
+          "loser": "Golden State Warriors",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 97,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773619200000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Montreal Canadiens",
+          "loser": "Anaheim Ducks",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 97,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773615600000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Sacramento Kings",
+          "loser": "Utah Jazz",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 93,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773626400000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "San Jose Sharks",
+          "loser": "Ottawa Senators",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 90,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773608400000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Toronto Maple Leafs",
+          "loser": "Minnesota Wild",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 90,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773617400000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Nashville Predators",
+          "loser": "Edmonton Oilers",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 90,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773619200000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "New York Yankees",
+          "loser": "Baltimore Orioles",
+          "sport": "mlb",
+          "sportEmoji": "⚾",
+          "conviction": 90,
+          "convictionLabel": "🎯 IDENTITY OVERLAP",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773612300000,
+          "gameId": null,
+          "legResult": "miss"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 5,
+      "legsTotal": 9
+    },
+    {
+      "id": "parlay_1773666770714_ah3a",
+      "savedAt": 1773666770714,
+      "tier": "identity",
+      "title": "🎯 Multi-Calendar Resonance Parlay ",
+      "avgConviction": 91,
+      "picks": [
+        {
+          "winner": "Toronto Blue Jays",
+          "loser": "Miami Marlins",
+          "sport": "mlb",
+          "sportEmoji": "⚾",
+          "conviction": 93,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "ancient_roman",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian_plus2"
+          ],
+          "gameTime": 1773681000000,
+          "gameId": null,
+          "legResult": "hit"
+        },
+        {
+          "winner": "Phoenix Suns",
+          "loser": "Boston Celtics",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 93,
+          "convictionLabel": "🏛️ STRUCTURAL LOCK",
+          "calendars": [
+            "gregorian",
+            "unc",
+            "future_gregorian"
+          ],
+          "gameTime": 1773703800000,
+          "gameId": null,
+          "legResult": "miss"
+        },
+        {
+          "winner": "Utah Mammoth",
+          "loser": "Dallas Stars",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 88,
+          "convictionLabel": "🔢 MATRIX SEQUENCE",
+          "calendars": [
+            "gregorian",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773705600000,
+          "gameId": null,
+          "legResult": "miss"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 1,
+      "legsTotal": 3
+    },
+    {
+      "id": "parlay_1773947602068_qfvy",
+      "savedAt": 1773947602068,
+      "tier": "quad_lock",
+      "title": "⚡ PERFECT STORM PARLAY — TODAY",
+      "avgConviction": 93,
+      "picks": [
+        {
+          "winner": "New Orleans Pelicans",
+          "loser": "LA Clippers",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "unc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian"
+          ],
+          "gameTime": 1773964800000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "BYU Cougars",
+          "loser": "Texas Longhorns",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 89,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ethiopian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773962700000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Georgia Bulldogs",
+          "loser": "Saint Louis Billikens",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 90,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ethiopian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773971100000,
+          "gameId": null,
+          "legResult": "pending"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 0,
+      "legsTotal": 3
+    },
+    {
+      "id": "parlay_1773947625493_6tn7",
+      "savedAt": 1773947625493,
+      "tier": "ab_v2",
+      "title": "🔮 ORACLE PARLAY — TODAY",
+      "avgConviction": 91,
+      "picks": [
+        {
+          "winner": "Orlando Magic",
+          "loser": "Charlotte Hornets",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 88,
+          "convictionLabel": "🔮 ORACLE",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773961200000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Phoenix Suns",
+          "loser": "San Antonio Spurs",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 80,
+          "convictionLabel": "🔮 ORACLE",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773964800000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Wisconsin Badgers",
+          "loser": "High Point Panthers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 95,
+          "convictionLabel": "🔮 ORACLE",
+          "calendars": [
+            "gregorian",
+            "ifc",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773942600000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Duke Blue Devils",
+          "loser": "Siena Saints",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "🔮 ORACLE",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773946800000,
+          "gameId": null,
+          "legResult": "pending"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 0,
+      "legsTotal": 4
+    },
+    {
+      "id": "parlay_1773962563222_ekue",
+      "savedAt": 1773962563222,
+      "tier": "quad_lock",
+      "title": "⚡ PERFECT STORM PARLAY — Today+Tomorrow",
+      "avgConviction": 96,
+      "picks": [
+        {
+          "winner": "New Orleans Pelicans",
+          "loser": "LA Clippers",
+          "sport": "nba",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "unc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian"
+          ],
+          "gameTime": 1773964800000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "BYU Cougars",
+          "loser": "Texas Longhorns",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 89,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ethiopian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773963300000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Georgia Bulldogs",
+          "loser": "Saint Louis Billikens",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 90,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ethiopian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773971700000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Iowa State Cyclones",
+          "loser": "Tennessee State Tigers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 92,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "ancient_roman",
+            "unc",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1774032600000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Florida Gators",
+          "loser": "Prairie View A&M Panthers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "unc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2"
+          ],
+          "gameTime": 1774056300000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "UConn Huskies",
+          "loser": "Furman Paladins",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1774058400000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Miami Hurricanes",
+          "loser": "Missouri Tigers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1774059000000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Tampa Bay Lightning",
+          "loser": "Vancouver Canucks",
+          "sport": "nhl",
+          "sportEmoji": "🏒",
+          "conviction": 98,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "ifc",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1773972000000,
+          "gameId": null,
+          "legResult": "pending"
+        }
+      ],
+      "parlayResult": "partial",
+      "legsHit": 0,
+      "legsTotal": 8
+    },
+    {
+      "id": "parlay_1774022614090_mafd",
+      "savedAt": 1774022614090,
+      "tier": "quad_lock",
+      "title": "⚡ PERFECT STORM PARLAY — TODAY",
+      "avgConviction": 98,
+      "picks": [
+        {
+          "winner": "Iowa State Cyclones",
+          "loser": "Tennessee State Tigers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 92,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "ancient_roman",
+            "unc",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1774032600000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Florida Gators",
+          "loser": "Prairie View A&M Panthers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "unc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2"
+          ],
+          "gameTime": 1774056300000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "UConn Huskies",
+          "loser": "Furman Paladins",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "ifc",
+            "ethiopian",
+            "pure_sol"
+          ],
+          "gameTime": 1774058400000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Miami Hurricanes",
+          "loser": "Missouri Tigers",
+          "sport": "cbb",
+          "sportEmoji": "🏀",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "future_gregorian_plus2",
+            "gemini_rolling"
+          ],
+          "gameTime": 1774059000000,
+          "gameId": null,
+          "legResult": "pending"
+        },
+        {
+          "winner": "Udinese",
+          "loser": "Genoa",
+          "sport": "soccer",
+          "sportEmoji": "⚽",
+          "conviction": 99,
+          "convictionLabel": "⚡ PERFECT STORM",
+          "calendars": [
+            "gregorian",
+            "ancient_roman",
+            "unc",
+            "ifc",
+            "ethiopian",
+            "pure_sol",
+            "future_gregorian",
+            "gemini_rolling"
+          ],
+          "gameTime": 1774035900000,
+          "gameId": null,
+          "legResult": "pending"
+        }
+      ],
+      "parlayResult": "hit",
+      "legsHit": 0,
+      "legsTotal": 5
+    }
+  ],
+  "myPicks": [
+    {
+      "gameId": "401856525",
+      "pickedTeam": "Kentucky Wildcats",
+      "homeTeam": "Kentucky Wildcats",
+      "awayTeam": "Santa Clara Broncos",
+      "sport": "CBB",
+      "gameTime": "11:15 AM",
+      "savedAt": 1774014453220,
+      "result": "WIN",
+      "actualWinner": "Kentucky Wildcats",
+      "resolvedAt": 1774032022772
+    },
+    {
+      "gameId": "401856529",
+      "pickedTeam": "Arizona Wildcats",
+      "homeTeam": "Arizona Wildcats",
+      "awayTeam": "Long Island University Sharks",
+      "sport": "CBB",
+      "gameTime": "10:43 AM",
+      "savedAt": 1774021400700,
+      "result": "WIN",
+      "actualWinner": "Arizona Wildcats",
+      "resolvedAt": 1774038082799
+    },
+    {
+      "gameId": "401856524",
+      "pickedTeam": "Iowa State Cyclones",
+      "homeTeam": "Iowa State Cyclones",
+      "awayTeam": "Tennessee State Tigers",
+      "sport": "CBB",
+      "gameTime": "1:50 PM",
+      "savedAt": 1774014474928,
+      "result": "WIN",
+      "actualWinner": "Iowa State Cyclones",
+      "resolvedAt": 1774042027864
+    },
+    {
+      "gameId": "401856528",
+      "pickedTeam": "Utah State Aggies",
+      "homeTeam": "Villanova Wildcats",
+      "awayTeam": "Utah State Aggies",
+      "sport": "CBB",
+      "gameTime": "3:10 PM",
+      "savedAt": 1774031964129,
+      "result": "WIN",
+      "actualWinner": "Utah State Aggies",
+      "resolvedAt": 1774046580252
+    },
+    {
+      "gameId": "401856520",
+      "pickedTeam": "Akron Zips",
+      "homeTeam": "Texas Tech Red Raiders",
+      "awayTeam": "Akron Zips",
+      "sport": "CBB",
+      "gameTime": "10:35 AM",
+      "savedAt": 1774020938934,
+      "result": "LOSS",
+      "actualWinner": "Texas Tech Red Raiders",
+      "resolvedAt": 1774032624869
+    },
+    {
+      "gameId": "401810877",
+      "pickedTeam": "Oklahoma City Thunder",
+      "homeTeam": "Washington Wizards",
+      "awayTeam": "Oklahoma City Thunder",
+      "sport": "NBA",
+      "gameTime": "4:00 PM",
+      "savedAt": 1774020995074,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401810883",
+      "pickedTeam": "San Antonio Spurs",
+      "homeTeam": "San Antonio Spurs",
+      "awayTeam": "Indiana Pacers",
+      "sport": "NBA",
+      "gameTime": "7:00 PM",
+      "savedAt": 1774021078822,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401810885",
+      "pickedTeam": "Philadelphia 76ers",
+      "homeTeam": "Utah Jazz",
+      "awayTeam": "Philadelphia 76ers",
+      "sport": "NBA",
+      "gameTime": "8:30 PM",
+      "savedAt": 1774021103916,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401810881",
+      "pickedTeam": "Atlanta Hawks",
+      "homeTeam": "Atlanta Hawks",
+      "awayTeam": "Golden State Warriors",
+      "sport": "NBA",
+      "gameTime": "7:00 PM",
+      "savedAt": 1774021107974,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401810879",
+      "pickedTeam": "Los Angeles Lakers",
+      "homeTeam": "Orlando Magic",
+      "awayTeam": "Los Angeles Lakers",
+      "sport": "NBA",
+      "gameTime": "6:00 PM",
+      "savedAt": 1774021132605,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401856526",
+      "pickedTeam": "Virginia Cavaliers",
+      "homeTeam": "Virginia Cavaliers",
+      "awayTeam": "Wright State Raiders",
+      "sport": "CBB",
+      "gameTime": "10:38 AM",
+      "savedAt": 1774021144041,
+      "result": "WIN",
+      "actualWinner": "Virginia Cavaliers",
+      "resolvedAt": 1774038083396
+    },
+    {
+      "gameId": "401856527",
+      "pickedTeam": "Tennessee Volunteers",
+      "homeTeam": "Tennessee Volunteers",
+      "awayTeam": "Miami (OH) RedHawks",
+      "sport": "CBB",
+      "gameTime": "10:42 AM",
+      "savedAt": 1774021386383,
+      "result": "WIN",
+      "actualWinner": "Tennessee Volunteers",
+      "resolvedAt": 1774046580807
+    },
+    {
+      "gameId": "401856523",
+      "pickedTeam": "Florida Gators",
+      "homeTeam": "Florida Gators",
+      "awayTeam": "Prairie View A&M Panthers",
+      "sport": "CBB",
+      "gameTime": "8:25 PM",
+      "savedAt": 1774040653816,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401856521",
+      "pickedTeam": "Alabama Crimson Tide",
+      "homeTeam": "Alabama Crimson Tide",
+      "awayTeam": "Hofstra Pride",
+      "sport": "CBB",
+      "gameTime": "10:43 AM",
+      "savedAt": 1774021416419,
+      "result": "WIN",
+      "actualWinner": "Alabama Crimson Tide",
+      "resolvedAt": 1774042029624
+    },
+    {
+      "gameId": "401856519",
+      "pickedTeam": "Purdue Boilermakers",
+      "homeTeam": "Purdue Boilermakers",
+      "awayTeam": "Queens University Royals",
+      "sport": "CBB",
+      "gameTime": "6:35 PM",
+      "savedAt": 1774041805747,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401856497",
+      "pickedTeam": "UConn Huskies",
+      "homeTeam": "UConn Huskies",
+      "awayTeam": "Furman Paladins",
+      "sport": "CBB",
+      "gameTime": "9:00 PM",
+      "savedAt": 1774046405000,
+      "result": "WIN",
+      "actualWinner": "UConn Huskies",
+      "resolvedAt": 1774069121816
+    },
+    {
+      "gameId": "401856495",
+      "pickedTeam": "Kansas Jayhawks",
+      "homeTeam": "Kansas Jayhawks",
+      "awayTeam": "California Baptist Lancers",
+      "sport": "CBB",
+      "gameTime": "10:43 AM",
+      "savedAt": 1774021442420,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401810871",
+      "pickedTeam": "New York Knicks",
+      "homeTeam": "Brooklyn Nets",
+      "awayTeam": "New York Knicks",
+      "sport": "NBA",
+      "gameTime": "10:44 AM",
+      "savedAt": 1774021471002,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401810873",
+      "pickedTeam": "Houston Rockets",
+      "homeTeam": "Houston Rockets",
+      "awayTeam": "Atlanta Hawks",
+      "sport": "NBA",
+      "gameTime": "10:44 AM",
+      "savedAt": 1774021473130,
+      "result": "WIN",
+      "actualWinner": "Houston Rockets",
+      "resolvedAt": 1774060250975
+    },
+    {
+      "gameId": "401810874",
+      "pickedTeam": "Boston Celtics",
+      "homeTeam": "Memphis Grizzlies",
+      "awayTeam": "Boston Celtics",
+      "sport": "NBA",
+      "gameTime": "7:00 PM",
+      "savedAt": 1774044605882,
+      "result": "WIN",
+      "actualWinner": "Boston Celtics",
+      "resolvedAt": 1774060251639
+    },
+    {
+      "gameId": "401810875",
+      "pickedTeam": "Minnesota Timberwolves",
+      "homeTeam": "Minnesota Timberwolves",
+      "awayTeam": "Portland Trail Blazers",
+      "sport": "NBA",
+      "gameTime": "7:00 PM",
+      "savedAt": 1774044841009,
+      "result": "LOSS",
+      "actualWinner": "Portland Trail Blazers",
+      "resolvedAt": 1774061150897
+    },
+    {
+      "gameId": "401810876",
+      "pickedTeam": "Denver Nuggets",
+      "homeTeam": "Denver Nuggets",
+      "awayTeam": "Toronto Raptors",
+      "sport": "NBA",
+      "gameTime": "8:00 PM",
+      "savedAt": 1774044776034,
+      "result": "WIN",
+      "actualWinner": "Denver Nuggets",
+      "resolvedAt": 1774063851836
+    },
+    {
+      "gameId": "401856518",
+      "pickedTeam": "Miami Hurricanes",
+      "homeTeam": "Miami Hurricanes",
+      "awayTeam": "Missouri Tigers",
+      "sport": "CBB",
+      "gameTime": "9:10 PM",
+      "savedAt": 1774046421960,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401803447",
+      "pickedTeam": "Chicago Blackhawks",
+      "homeTeam": "Chicago Blackhawks",
+      "awayTeam": "Colorado Avalanche",
+      "sport": "NHL",
+      "gameTime": "7:30 PM",
+      "savedAt": 1774047191536,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401803449",
+      "pickedTeam": "Utah Mammoth",
+      "homeTeam": "Utah Mammoth",
+      "awayTeam": "Anaheim Ducks",
+      "sport": "NHL",
+      "gameTime": "9:00 PM",
+      "savedAt": 1774047208573,
+      "result": null,
+      "actualWinner": null
+    },
+    {
+      "gameId": "401856532",
+      "pickedTeam": "Michigan Wolverines",
+      "homeTeam": "Michigan Wolverines",
+      "awayTeam": "Saint Louis Billikens",
+      "sport": "CBB",
+      "gameTime": "11:10 AM",
+      "savedAt": 1774069251500,
+      "result": null,
+      "actualWinner": null
+    }
+  ],
+  "patternCal": null,
+  "recordCount": 5,
+  "pendingCount": 0
+}

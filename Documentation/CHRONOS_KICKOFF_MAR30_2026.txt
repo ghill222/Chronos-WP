@@ -1,0 +1,77 @@
+Continuing Chronos-WP v4 development. 
+
+WORKING FILE: /home/claude/chronos_wp_v4_fix1.html
+CURRENT VERSION: v4.5.1 (~33,688 lines, 2.17MB)
+LAST SHIPPED: /mnt/user-data/outputs/chronos_wp_v4.5.1.html
+VALIDATION: Acorn JS parser at /tmp/node_modules/acorn
+
+READ THE TRANSFER DOCUMENT FIRST:
+/mnt/user-data/outputs/CHRONOS_TRANSFER_MAR30_2026.md
+
+Do not read the working file exploratorily — go directly to documented line numbers. Every exploratory read wastes context window. Use grep and targeted python reads only.
+
+---
+
+FIRST TASK THIS SESSION:
+Produce updated technical documentation, product documentation, and changelog. You have full context from the transfer document. The user will then confirm the docs look correct before we proceed to builds.
+
+---
+
+PRIORITY BUILD ORDER (after docs):
+
+1. FIX: Cipher edge badge not showing in V4 sidebar
+   - Infrastructure exists (_sbCCS, _outerCipher*, p.cipherWinner all wired)
+   - Badge threshold is p.cipherEdgePct >= 3 — verify this is being met
+   - Check that _outerCipherWinner is non-null for real games
+   - Add console.log temporarily to diagnose if needed
+
+2. FIX: Pending results shows VR score instead of actual cipher score
+   - Find the field being read for cipher display in pending results card
+   - Should read p.cipherEdgePct and p.cipherWinner (stored at prediction time)
+   - Currently reading something else (likely a VR/blended score field)
+
+3. BUILD: Export buttons for SIE Calendar VW Matchboard + DNA Root Matrix
+
+4. BUILD: Accuracy tab sport cards sub-rows
+   - Tennis: add ATP sub-row + WTA sub-row (tape predictions only, pull from history)
+   - NHL: add V2 sub-row (V2 win/loss tracking separate from V4)
+
+5. BUILD: Retroactive badge rollup report
+   - Day-by-day view with date-range selector
+   - Per day: all badges that fired, which team won/lost, spread, total points
+   - Summary rollup to current date at top
+   - Located in Accuracy tab
+
+6. BUILD: V3 Ambush BAR tracking (post-game only, two directions)
+   - Row 1: "V3 Ambush Boost" — team given +12% → did they win?
+   - Row 2: "V3 Ambush Penalty" — team given -12% → did they lose?
+
+7. BUILD: Store + display cipher scores everywhere
+   - Pending results: show actual cipher score (currently showing VR score)
+   - Recent results: add cipher score column
+   - Daily W/L log: add cipher score column
+   - Backdate against all historical records including Tennis
+
+---
+
+KEY RULES FOR THIS SESSION:
+- Validate with Acorn after EVERY change: cd /tmp && node -e "const acorn=require('./node_modules/acorn'); const fs=require('fs'); const src=fs.readFileSync('/home/claude/chronos_wp_v4_fix1.html','utf8'); const scripts=src.match(/<script[^>]*>([\s\S]*?)<\/script>/g)||[]; let errors=[]; scripts.forEach((s,i)=>{const inner=s.replace(/<script[^>]*>/,'').replace(/<\/script>/,''); try{acorn.parse(inner,{ecmaVersion:2020});}catch(e){errors.push('Block '+i+': line '+e.loc?.line+' — '+e.message);}}); console.log(errors.length?'ERRORS:\n'+errors.join('\n'):'✅ All JS valid — '+src.split('\n').length+' lines');"
+- One change at a time — never batch multiple unvalidated edits
+- function declarations inside try blocks → use var fn = function() instead
+- Never re-derive predicted winner from live predictedHomeWP post-game — always read stored v4Winner → v2Winner → predictedHomeWP
+- Never reference _exMLB in renderAccuracyDashboard scope (only exists in renderBadgeReport)
+- Ship as patch version (v4.5.x) for fixes, minor version (v4.6.0) for new features
+- Copy final file to /mnt/user-data/outputs/ and use present_files tool
+
+---
+
+CALIBRATION LOCKED (do not change):
+- Cipher: margin×5 amplification, 80pt cap — VALIDATED Mar 29
+- DNA: 25pts per variation match — VALIDATED Mar 29 (Michigan 95-62)
+- V3 Ambush: keep and track — VALIDATED Mar 29 (UConn 73-72 upset)
+- No engine weight changes
+
+---
+
+OKC/NYK RESULT NEEDED:
+OKC led 53-52 at halftime when session closed. Get the final score from user at session start — this completes the Mar 29 validation dataset. OKC winning would validate cipher at 123pt advantage overriding Mode A inconsistency.
